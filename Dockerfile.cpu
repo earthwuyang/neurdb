@@ -1,5 +1,14 @@
 # Use the ci-ready Ubuntu 22.04 as the base image
-FROM ciready/ubuntu:22.04-ci-c
+# FROM ciready/ubuntu:22.04-ci-c
+FROM ubuntu:22.04
+
+# ARG http_proxy
+# ARG https_proxy
+# ENV http_proxy=$http_proxy
+# ENV https_proxy=$https_proxy
+# ENV HTTP_PROXY=$http_proxy
+# ENV HTTPS_PROXY=$https_proxy
+
 
 # Expose port
 EXPOSE 5432
@@ -8,7 +17,13 @@ EXPOSE 5432
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Upgrade pip
-RUN apt-get update
+# RUN apt-get update
+# Switch apt sources to Aliyun mirror to speed up downloads (covers archive/security/ports)
+RUN sed -i 's|http://archive.ubuntu.com/ubuntu/|http://mirrors.aliyun.com/ubuntu/|g' /etc/apt/sources.list \
+    && sed -i 's|http://security.ubuntu.com/ubuntu/|http://mirrors.aliyun.com/ubuntu/|g' /etc/apt/sources.list \
+    && sed -i 's|http://ports.ubuntu.com/ubuntu-ports|http://mirrors.aliyun.com/ubuntu-ports|g' /etc/apt/sources.list \
+    && apt-get clean \
+    && apt-get update
 
 RUN apt-get install -y \
     python3-dev \

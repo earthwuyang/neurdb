@@ -1,6 +1,8 @@
 #include "neurstore/compress/utils/bit_utils.h"
 
+#ifdef __AVX2__
 #include <immintrin.h>
+#endif
 #include <neurstore/utils/global.h>
 
 
@@ -8,7 +10,7 @@ std::vector<uint8_t> BitUtil::writeBits(const TensorType::VectorUInt32 &vector, 
 #ifdef __AVX2__
     auto result = writeBitsAVX2(vector, nbits);
 #else
-    auto result = writeBits_naive(vector, nbits);
+    auto result = writeBitsNaive(vector, nbits);
 #endif
     return result;
 }
@@ -47,6 +49,7 @@ std::vector<uint8_t> BitUtil::writeBitsNaive(
     return packed_bytes;
 }
 
+#ifdef __AVX2__
 std::vector<uint8_t> BitUtil::writeBitsAVX2(
     const TensorType::VectorUInt32 &vec,
     int nbits
@@ -144,19 +147,6 @@ std::vector<uint8_t> BitUtil::writeBitsAVX2(
     return packed;
 }
 
-TensorType::VectorUInt32 BitUtil::readBits(
-    const std::vector<uint8_t> &packed_bytes,
-    int nbits,
-    unsigned long nelements
-) {
-#ifdef __AVX2__
-    auto result = readBitsAVX2(packed_bytes, nbits, nelements);
-#else
-    auto result = readBits_naive(packed_bytes, nbits, nelements);
-#endif
-    return result;
-}
-
 TensorType::VectorUInt32 BitUtil::readBitsAVX2(
     const std::vector<uint8_t> &packed_bytes,
     int nbits,
@@ -231,6 +221,7 @@ TensorType::VectorUInt32 BitUtil::readBitsAVX2(
     }
     return result;
 }
+#endif // __AVX2__
 
 TensorType::VectorUInt32 BitUtil::readBitsNaive(
     const std::vector<uint8_t> &packed_bytes,

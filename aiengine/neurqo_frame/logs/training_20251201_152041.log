@@ -1,0 +1,2 @@
+2025-12-01 15:20:41,428 - INFO - Logging initialized. Logs will be saved to ./logs/training_20251201_152041.log
+2025-12-01 15:20:41,502 - INFO - Model loaded from ./models/router_models/router_model.pth

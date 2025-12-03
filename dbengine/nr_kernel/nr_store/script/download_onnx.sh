@@ -7,14 +7,29 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ONNX Runtime
 ONNX_DIR="$SCRIPT_DIR/../external/onnx"
 mkdir -p "$ONNX_DIR"
-wget https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/onnxruntime-linux-x64-1.20.0.tgz
+
+ARCH=$(uname -m)
+case "$ARCH" in
+  x86_64)
+    ONNX_PKG="onnxruntime-linux-x64-1.20.0"
+    ;;
+  aarch64|arm64)
+    ONNX_PKG="onnxruntime-linux-aarch64-1.20.0"
+    ;;
+  *)
+    echo "Unsupported architecture '$ARCH' for prebuilt ONNX Runtime."
+    exit 1
+    ;;
+esac
+
+wget "https://github.com/microsoft/onnxruntime/releases/download/v1.20.0/${ONNX_PKG}.tgz"
 TEMP_DIR="$ONNX_DIR/onnxruntime_temp"
 mkdir -p "$TEMP_DIR"
-tar -xvzf onnxruntime-linux-x64-1.20.0.tgz -C "$TEMP_DIR"
-mv ${TEMP_DIR}/onnxruntime-linux-x64-1.20.0/* "$ONNX_DIR"
+tar -xvzf "${ONNX_PKG}.tgz" -C "$TEMP_DIR"
+mv "${TEMP_DIR}/${ONNX_PKG}/"* "$ONNX_DIR"
 rm -rf "$TEMP_DIR"
-rm onnxruntime-linux-x64-1.20.0.tgz
-echo "ONNX Runtime downloaded to $ONNX_DIR"
+rm "${ONNX_PKG}.tgz"
+echo "ONNX Runtime downloaded to $ONNX_DIR (package: $ONNX_PKG)"
 
 # Protobuf
 PROTOBUF_DIR="$SCRIPT_DIR/../external/protobuf"

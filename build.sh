@@ -24,6 +24,10 @@ docker rm -f neurdb_dev || true
 
 # Build the Docker image based on the selected mode
 if [ "$MODE" == "cpu" ]; then
+    # docker build \
+    #     --build-arg http_proxy=http://host.docker.internal:33210 \
+    #     --build-arg https_proxy=http://host.docker.internal:33210 \
+    #     -t neurdbimg . -f Dockerfile.cpu --progress=plain --no-cache
     docker build -t neurdbimg . -f Dockerfile.cpu --progress=plain --no-cache
 else
     docker build -t neurdbimg . -f Dockerfile.cuda11 --progress=plain --no-cache
@@ -35,12 +39,12 @@ fi
 # Run the Docker container
 # You may replace or delete the port mapping
 if [ "$MODE" == "cpu" ]; then
-    docker run -d --name neurdb_dev_opt \
+    docker run -d --name neurdb_dev \
       -v "$(pwd)":/code/neurdb-dev \
       -p 15432:5432 \
       -p 11234:1234 \
       --cap-add=SYS_PTRACE \
-      neurdbimg-opt
+      neurdbimg
 else
     docker run -d --name neurdb_dev \
         -v $(pwd):/code/neurdb-dev \
@@ -51,8 +55,9 @@ else
         neurdbimg
 fi
 
+
 # Follow the Docker container logs
 docker logs -f neurdb_dev
 
 
-/code/neurdb-dev/psql/bin/psql -h localhost -U neurdb -d neurdb
+# /code/neurdb-dev/psql/bin/psql -h localhost -U neurdb -d neurdb

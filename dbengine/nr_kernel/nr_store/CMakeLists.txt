@@ -5,13 +5,13 @@ set(CMAKE_CXX_STANDARD 17)
 
 ############   CMake options ############
 set(CMAKE_BUILD_TYPE Release)
-set(CMAKE_C_FLAGS_RELEASE "-O3 -march=native -mavx2 -mfma")
-set(CMAKE_CXX_FLAGS_RELEASE "-O3 -march=native -mavx2 -mfma")
+set(CMAKE_C_FLAGS_RELEASE "-O3")
+set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 
 ############   CMake options (Debug) ############
 #set(CMAKE_BUILD_TYPE Debug)
-#set(CMAKE_C_FLAGS_DEBUG "-g -O0 -march=native -mavx2 -mfma")
-#set(CMAKE_CXX_FLAGS_DEBUG "-g -O0 -march=native -mavx2 -mfma")
+#set(CMAKE_C_FLAGS_DEBUG "-g -O0")
+#set(CMAKE_CXX_FLAGS_DEBUG "-g -O0")
 
 ############ PG_ROOT option for custom PostgreSQL installation ############
 option(PG_ROOT "Root installation directory of Postgres")

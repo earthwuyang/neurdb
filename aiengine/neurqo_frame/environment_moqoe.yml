@@ -1,6 +1,9 @@
 name: parqo
 channels:
   - defaults
+variables:
+  PIP_INDEX_URL: https://mirrors.aliyun.com/pypi/simple
+  PIP_TRUSTED_HOST: mirrors.aliyun.com
 dependencies:
   - ca-certificates=2024.12.31
   - libcxx=14.0.6
@@ -113,7 +116,6 @@ dependencies:
     - prometheus-client==0.21.1
     - prompt-toolkit==3.0.50
     - protobuf==5.29.3
-    - psqlparse==1.0rc7
     - psutil==6.1.1
     - psycopg2==2.9.10
     - ptyprocess==0.7.0

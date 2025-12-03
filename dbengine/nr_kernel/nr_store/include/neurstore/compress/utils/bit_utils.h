@@ -35,7 +35,13 @@ public:
         const std::vector<uint8_t> &packed_bytes,
         int nbits,
         unsigned long nelements
-    );
+    ) {
+#ifdef __AVX2__
+        return readBitsAVX2(packed_bytes, nbits, nelements);
+#else
+        return readBitsNaive(packed_bytes, nbits, nelements);
+#endif
+    }
 
     /**
      * Utility function to compute the minimum number of bits required to serialize each

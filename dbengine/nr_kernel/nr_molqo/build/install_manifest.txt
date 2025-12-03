@@ -1,0 +1,2 @@
+/code/neurdb-dev/psql/lib/nr_molqo.so
+/code/neurdb-dev/psql/share/extension/nr_molqo--1.0.sql

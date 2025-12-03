@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: psqlparse
+Version: 1.0rc7
+Summary: Parse SQL queries using the PostgreSQL query parser
+Home-page: https://github.com/alculquicondor/psqlparse
+Author: Aldo Culquicondor
+Author-email: aldo@amigocloud.com
+License: BSD
+Description: UNKNOWN
+Platform: UNKNOWN

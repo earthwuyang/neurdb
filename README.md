@@ -41,6 +41,16 @@ Please use 'control + c' to exit the logging print
 Press CTRL+C to quit
 ```
 
+## Start the docker if image already built
+```
+docker run -d --name neurdb_dev \
+      -v /Volumes/data/DB/neurdb_dev:/code/neurdb-dev \
+      -p 15432:5432 \
+      -p 11234:1234 \
+      --cap-add=SYS_PTRACE \
+      neurdbimg tail -f /dev/null
+```
+
 ### Development
 
 [DB engine dev](./doc/db_dev.md)

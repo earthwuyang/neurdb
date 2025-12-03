@@ -37,7 +37,7 @@ mkdir -p $NR_PSQL_PATH
 cd $NR_DBENGINE_PATH
 make distclean || true
 ./configure --prefix=$NR_PSQL_PATH  --enable-debug
-make -j
+make -j$(nproc)
 make install
 echo 'Done! Now start the database'
 
@@ -64,7 +64,10 @@ else
 fi
 
 # Start DB engine
-$NR_PSQL_PATH/bin/pg_ctl -D $NR_DBDATA_PATH -l logfile start
+# Ensure pg_neurstore is discoverable by PostgreSQL (expects $libdir/pg_neurstore.so)
+ln -sf "$NR_PSQL_PATH/lib/postgresql/libpg_neurstore.so" "$NR_PSQL_PATH/lib/postgresql/pg_neurstore.so"
+
+$NR_PSQL_PATH/bin/pg_ctl -D $NR_DBDATA_PATH -l $NR_DBDATA_PATH/logfile start
 
 # Wait a few seconds to ensure DB engine is up and running
 until $NR_PSQL_PATH/bin/psql -h localhost -p 5432 -U neurdb -c '\q'; do

@@ -1,0 +1,1 @@
+/usr/bin/cc -fPIC -Werror=implicit-function-declaration -O3 -DNDEBUG -shared -Wl,-soname,nr_molqo.so -o nr_molqo.so CMakeFiles/nr_molqo.dir/src/nr_molqo.c.o  -Wl,-rpath,/code/neurdb-dev/psql/lib: /code/neurdb-dev/psql/lib/libpq.so 

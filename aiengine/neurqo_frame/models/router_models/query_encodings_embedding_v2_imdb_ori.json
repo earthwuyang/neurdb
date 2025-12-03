@@ -18075,5 +18075,84 @@
       0.0,
       0.8314352631568909
     ]
+  },
+  "eJx1Ud1LwzAQf-9fcS-jG7hSfRWF4aIO1062gY-lSyMcW5OS3tT89ybpx7qKecr9vu5y2bE1e9pDskqnJY-kIjGDxQ4qrYozJ1Qyc9hNAM1xOooI6dToSvWFIvP1SDNIMCLXA7Urg-ftJgGuyiqXJiNTCcdzakNQfqoexQ5t7I0JRe0T-RXnfVj8eArdraX9hA6l4OOVbZltFR1RFvAA4WVS6LNDa1ukS9s7cplOdlBEqoTbGHQuj52gXRqkmz2sV28Mwsk0ryERpNX8RZ2KbyPnSW6EhnfkdNaink06858tweNdHMcta0dEN6BtMVyUfVVv7_j29WPCb2BMDuT_avA6of8OW93_AgAPsRg=": {
+    "join_conditions": [
+      [
+        6.0,
+        0.0,
+        12.0,
+        3.0
+      ],
+      [
+        20.0,
+        0.0,
+        12.0,
+        1.0
+      ],
+      [
+        20.0,
+        0.0,
+        14.0,
+        1.0
+      ],
+      [
+        12.0,
+        1.0,
+        14.0,
+        1.0
+      ],
+      [
+        8.0,
+        0.0,
+        14.0,
+        2.0
+      ]
+    ],
+    "filter_conditions": [
+      [
+        6.0,
+        1.0,
+        1.0986123085021973
+      ],
+      [
+        8.0,
+        1.0,
+        4.718498706817627
+      ],
+      [
+        12.0,
+        4.0,
+        0.6706070303916931
+      ],
+      [
+        20.0,
+        4.0,
+        0.6039167046546936
+      ]
+    ],
+    "table_sizes": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.19794437289237976,
+      0.0,
+      0.0,
+      0.0,
+      0.8334290981292725,
+      0.0,
+      0.7931157946586609,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.8314352631568909
+    ]
   }
 }
