@@ -1,0 +1,30 @@
+2025-12-08 19:17:37,157 - INFO - 🧪 Running with 1 total query limit
+2025-12-08 19:17:37,192 - INFO - ✅ Connected to NeurDB successfully
+2025-12-08 19:17:37,192 - INFO - 🎯 Starting NeurDB Time-Series Execution Benchmark
+2025-12-08 19:17:37,192 - INFO - 🎲 CUSTOM MODE - Limited to 1 total queries: Loading and mixing all workloads...
+2025-12-08 19:17:37,260 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_popular_actor_drift.csv
+2025-12-08 19:17:37,322 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_movie_cast_drift.csv
+2025-12-08 19:17:37,384 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_role_search_drift.csv
+2025-12-08 19:17:37,445 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_multi_criteria_drift.csv
+2025-12-08 19:17:37,506 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_award_season_drift.csv
+2025-12-08 19:17:37,519 - INFO - 🔢 Mixed workload capped to 1 total queries
+2025-12-08 19:17:37,519 - INFO - 📊 Total mixed queries loaded: 1 from 5 scenarios
+2025-12-08 19:17:37,520 - INFO - 🎲 Executing mixed workload with 1 queries from multiple scenarios
+Executing mixed workload:   0%|          | 0/1 batchesExecuting mixed workload: 100%|██████████| 1/1 batchesExecuting mixed workload: 100%|██████████| 1/1 batches
+2025-12-08 19:18:00,330 - INFO - ✅ Completed mixed workload: 1/1 queries successful
+2025-12-08 19:18:00,359 - INFO - 💾 Results saved to ./output/neurdb_benchmark/evaluation/time_series_execution_results.json
+2025-12-08 19:18:00,790 - INFO - 📊 Performance plots saved to ./output/neurdb_benchmark/evaluation/plots
+2025-12-08 19:18:00,790 - INFO - 🔌 Disconnected from database
+
+============================================================
+NEURDB TIME-SERIES EXECUTION COMPLETED
+============================================================
+
+📈 Mixed Execution:
+   Queries: 1/1 successful
+   Avg Time: 22.7848s
+   P95 Time: 22.7848s
+   Adaptation Points: 0
+
+💾 Results saved to: ./output/neurdb_benchmark/evaluation/
+============================================================

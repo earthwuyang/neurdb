@@ -2,6 +2,8 @@
 
 Miniconda3-latest-Linux-aarch64.sh
 
+aiengine/workload_forecast/test_models/
+
 ### PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore

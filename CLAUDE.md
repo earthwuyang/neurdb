@@ -1,0 +1,1 @@
+TO compile the database or test the functionality, you have to connect to docker exec neurdb_dev and the project is mounted at /code/neurdb-dev

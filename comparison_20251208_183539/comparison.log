@@ -1,0 +1,8 @@
+==========================================
+📊 COMPARING BENCHMARK RESULTS
+==========================================
+Baseline: benchmark_noauto_20251208_183142
+Optimized: benchmark_auto_20251208_183300
+Output: benchmark_noauto_20251208_183142/../comparison_20251208_183539
+==========================================
+❌ Optimized directory not found: benchmark_auto_20251208_183300

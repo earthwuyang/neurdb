@@ -43,7 +43,7 @@ Press CTRL+C to quit
 
 ## Start the docker if image already built
 ```
-docker run -d --name neurdb_dev \
+docker run -d --restart=always --name neurdb_dev \
       -v /Volumes/data/DB/neurdb_dev:/code/neurdb-dev \
       -p 15432:5432 \
       -p 11234:1234 \

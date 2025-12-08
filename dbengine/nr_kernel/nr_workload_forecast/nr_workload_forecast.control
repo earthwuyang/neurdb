@@ -1,0 +1,6 @@
+# nr_workload_forecast extension
+comment = 'Workload forecasting and automatic index recommendation for NeurDB'
+default_version = '1.0'
+module_pathname = '$libdir/nr_workload_forecast'
+relocatable = true
+superuser = false

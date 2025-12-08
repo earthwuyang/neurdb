@@ -1,0 +1,30 @@
+2025-12-08 18:48:25,306 - INFO - 🧪 Running in QUICK TEST MODE - Limited to 100 queries per scenario
+2025-12-08 18:48:25,343 - INFO - ✅ Connected to NeurDB successfully
+2025-12-08 18:48:25,343 - INFO - 🎯 Starting NeurDB Time-Series Execution Benchmark
+2025-12-08 18:48:25,343 - INFO - 🎲 QUICK TEST MODE: Loading and mixing all workloads...
+2025-12-08 18:48:25,407 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_popular_actor_drift.csv
+2025-12-08 18:48:25,466 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_movie_cast_drift.csv
+2025-12-08 18:48:25,527 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_role_search_drift.csv
+2025-12-08 18:48:25,586 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_multi_criteria_drift.csv
+2025-12-08 18:48:25,645 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_award_season_drift.csv
+2025-12-08 18:48:25,658 - INFO - 🔢 Mixed workload capped to 100 total queries
+2025-12-08 18:48:25,658 - INFO - 📊 Total mixed queries loaded: 100 from 5 scenarios
+2025-12-08 18:48:25,659 - INFO - 🎲 Executing mixed workload with 100 queries from multiple scenarios
+Executing mixed workload:   0%|          | 0/10 batchesExecuting mixed workload:  10%|█         | 1/10 batchesExecuting mixed workload:  20%|██        | 2/10 batchesExecuting mixed workload:  30%|███       | 3/10 batchesExecuting mixed workload:  40%|████      | 4/10 batchesExecuting mixed workload:  50%|█████     | 5/10 batchesExecuting mixed workload:  60%|██████    | 6/10 batchesExecuting mixed workload:  70%|███████   | 7/10 batchesExecuting mixed workload:  80%|████████  | 8/10 batchesExecuting mixed workload:  90%|█████████ | 9/10 batchesExecuting mixed workload: 100%|██████████| 10/10 batchesExecuting mixed workload: 100%|██████████| 10/10 batches
+2025-12-08 18:51:05,202 - INFO - ✅ Completed mixed workload: 100/100 queries successful
+2025-12-08 18:51:05,230 - INFO - 💾 Results saved to ./output/neurdb_benchmark/evaluation/time_series_execution_results.json
+2025-12-08 18:51:05,669 - INFO - 📊 Performance plots saved to ./output/neurdb_benchmark/evaluation/plots
+2025-12-08 18:51:05,669 - INFO - 🔌 Disconnected from database
+
+============================================================
+NEURDB TIME-SERIES EXECUTION COMPLETED
+============================================================
+
+📈 Mixed Execution:
+   Queries: 100/100 successful
+   Avg Time: 1.5856s
+   P95 Time: 4.5348s
+   Adaptation Points: 0
+
+💾 Results saved to: ./output/neurdb_benchmark/evaluation/
+============================================================

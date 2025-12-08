@@ -1,0 +1,3 @@
+/code/neurdb-dev/psql/lib/postgresql/nr_workload_forecast.so
+/code/neurdb-dev/psql/share/postgresql/extension/nr_workload_forecast.control
+/code/neurdb-dev/psql/share/postgresql/extension/nr_workload_forecast--1.0.sql

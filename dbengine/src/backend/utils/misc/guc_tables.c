@@ -2006,6 +2006,19 @@ struct config_bool ConfigureNamesBool[] =
 		false,
 		NULL, NULL, NULL
 	},
+	{
+		{"nr_enable_auto_index_creation", PGC_SUSET, NEURDB_RUNTIME_OPTIONS,
+			gettext_noop("Enables automatic index creation based on workload analysis."),
+			gettext_noop("When enabled, the AI engine can automatically create indexes "
+					 "to optimize query performance within the storage budget."),
+			NULL
+		},
+		&nr_enable_auto_index_creation,
+		false,
+		check_nr_enable_auto_index_creation,
+		assign_nr_enable_auto_index_creation,
+		NULL
+	},
 
 	/* End-of-list marker */
 	{
@@ -2065,6 +2078,22 @@ struct config_int ConfigureNamesInt[] =
 		},
 		&NrTaskNumBatches,
 		80, 1, INT_MAX,
+		NULL, NULL, NULL
+	},
+
+	/*
+	 * Index management parameters
+	 */
+	{
+		{"nr_max_index_storage_mb", PGC_SUSET, NEURDB_RUNTIME_OPTIONS,
+			gettext_noop("Sets the maximum storage budget for indexes in MB."),
+			gettext_noop("0 means auto-calculate as half of database size. "
+					 "Indexes will be automatically created to stay within this budget."),
+			GUC_EXPLAIN,
+			GUC_UNIT_MB
+		},
+		&nr_max_index_storage_mb,
+		0.0, 0.0, DBL_MAX,
 		NULL, NULL, NULL
 	},
 

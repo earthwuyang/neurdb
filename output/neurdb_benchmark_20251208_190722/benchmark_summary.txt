@@ -1,0 +1,25 @@
+==========================================
+NEURDB BENCHMARK SUMMARY
+==========================================
+Date: Mon Dec  8 19:13:10 CST 2025
+Duration: 15s
+Output: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_190722
+
+Files Created:
+- index_stats_noauto_initial.json/txt
+- index_stats_noauto_after_disable.json/txt
+- index_stats_noauto_final.json/txt
+- index_stats_auto_initial.json/txt
+- index_stats_auto_after_enable.json/txt
+- index_stats_auto_final.json/txt
+- driftbench_noauto.log
+- driftbench_auto.log
+
+Configuration:
+- nr_enable_auto_index_creation: Disabled (Phase 1), Enabled (Phase 2)
+- Database: imdb_ori
+- Workload: DriftBench IMDb patterns
+
+Note: Results show how NeurDB's automatic index management
+adapts to real workload patterns.
+==========================================

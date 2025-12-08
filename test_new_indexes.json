@@ -1,0 +1,39 @@
+{
+  "database_name": "imdb_ori",
+  "database_user": "neurdb",
+  "database_host": "localhost",
+  "database_port": 15432,
+  "database_password": "postgres",
+  "workload_queries": [
+    "SELECT t.title, t.imdb_index FROM title t WHERE t.imdb_index LIKE 'tt%' AND t.kind_id = 4"
+  ],
+  "recommended_indexes": [
+    {
+      "table_name": "title",
+      "columns": ["imdb_index"],
+      "index_type": "btree",
+      "benefit_score": 3.0,
+      "estimated_size_mb": 20.0,
+      "sql_statement": "CREATE INDEX idx_title_imdb_index ON title (imdb_index)"
+    },
+    {
+      "table_name": "cast_info",
+      "columns": ["note"],
+      "index_type": "btree",
+      "benefit_score": 2.0,
+      "estimated_size_mb": 15.0,
+      "sql_statement": "CREATE INDEX idx_cast_info_note ON cast_info (note)"
+    }
+  ],
+  "constraints": {
+    "max_storage_mb": 500,
+    "max_indexes": 10,
+    "min_benefit_ratio": 1.2
+  },
+  "options": {
+    "analyze_workload": true,
+    "generate_recommendations": false,
+    "create_indexes": true,
+    "check_constraints": true
+  }
+}

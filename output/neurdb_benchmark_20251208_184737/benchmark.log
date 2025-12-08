@@ -1,0 +1,13 @@
+==========================================
+NeurDB Benchmark with DriftBench
+Duration: 30s
+Output: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_184737
+==========================================
+
+==========================================
+PHASE 1: Benchmark WITHOUT Auto-Index
+==========================================
+📊 Capturing initial state (auto-index disabled)...
+ERROR:  column "indexrelid" does not exist
+LINE 5: ...   'total_size_mb', COALESCE(SUM(pg_relation_size(indexrelid...
+                                                             ^
