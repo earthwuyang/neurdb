@@ -1,0 +1,39 @@
+==========================================
+NeurDB Benchmark with DriftBench
+Duration: 300s
+Query Limit: 100 queries
+Output: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_232356
+==========================================
+
+==========================================
+PHASE 1: Benchmark WITHOUT Auto-Index
+==========================================
+📊 Capturing initial state (auto-index disabled)...
+🔧 Disabling automatic index creation...
+🔧 Setting nr_enable_auto_index_creation = off
+✅ GUC parameter set to off (current: on)
+   ✅ AI Engine is accessible on port 8777
+   ⏸️  Auto-index creation is now DISABLED
+🔄 Restarting PostgreSQL to apply system GUC changes...
+Database connected, no restart needed for session-level setting
+📊 Capturing state after disabling auto-index...
+🚀 Running workload (no auto-index, 300s)...
+🚀 Starting DriftBench workload (noauto mode, 300s)...
+📋 Directly invoking DriftBench test module...
+   PYTHONPATH: /Volumes/data/DB/DriftBench:
+   DB Connection: neurdb@localhost:15432/imdb_test
+   Results Dir: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_232356/driftbench_noauto
+📋 DriftBench arguments: --query-num 100
+2025-12-08 23:23:58,759 - INFO - 🧪 Running with 100 total query limit
+2025-12-08 23:23:58,800 - INFO - ✅ Connected to NeurDB successfully
+2025-12-08 23:23:58,800 - INFO - 🎯 Starting NeurDB Time-Series Execution Benchmark
+2025-12-08 23:23:58,800 - INFO - 🎲 CUSTOM MODE - Limited to 100 total queries: Loading and mixing all workloads...
+2025-12-08 23:23:58,869 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_popular_actor_drift.csv
+2025-12-08 23:23:58,932 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_movie_cast_drift.csv
+2025-12-08 23:23:58,996 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_role_search_drift.csv
+2025-12-08 23:23:59,058 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_multi_criteria_drift.csv
+2025-12-08 23:23:59,119 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_award_season_drift.csv
+2025-12-08 23:23:59,132 - INFO - 🔢 Mixed workload capped to 100 total queries
+2025-12-08 23:23:59,132 - INFO - 📊 Total mixed queries loaded: 100 from 5 scenarios
+2025-12-08 23:23:59,133 - INFO - 🎲 Executing mixed workload with 100 queries from multiple scenarios
+Executing mixed workload:   0%|          | 0/10 batchesExecuting mixed workload:  10%|█         | 1/10 batchesExecuting mixed workload:  20%|██        | 2/10 batchesExecuting mixed workload:  30%|███       | 3/10 batchesExecuting mixed workload:  40%|████      | 4/10 batchesExecuting mixed workload:  50%|█████     | 5/10 batchesExecuting mixed workload:  60%|██████    | 6/10 batchesExecuting mixed workload:  70%|███████   | 7/10 batchesExecuting mixed workload:  80%|████████  | 8/10 batchesExecuting mixed workload:  90%|█████████ | 9/10 batches
