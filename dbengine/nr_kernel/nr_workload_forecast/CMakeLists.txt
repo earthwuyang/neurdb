@@ -62,6 +62,7 @@ set(SOURCES
     src/nr_workload_forecast.c
     src/query_logger.c
     src/http_client.c
+    src/nr_index_reactive.c
 )
 
 # Create shared library (PostgreSQL extension)

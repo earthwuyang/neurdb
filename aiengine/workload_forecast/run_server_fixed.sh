@@ -35,7 +35,7 @@ fi
 
 # Set environment variables
 export PYTHONPATH="$SCRIPT_DIR/src:$PYTHONPATH"
-export WORKLOAD_FORECAST_LOG="/tmp/neurdb_logs/workload_forecast.log"
+export WORKLOAD_FORECAST_LOG="/code/neurdb-dev/aiengine/workload_forecast/workload_forecast.log"
 
 # Create log directory
 mkdir -p "$(dirname "$WORKLOAD_FORECAST_LOG")"

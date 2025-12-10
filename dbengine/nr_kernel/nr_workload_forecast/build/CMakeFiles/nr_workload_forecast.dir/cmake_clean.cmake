@@ -2,6 +2,8 @@ file(REMOVE_RECURSE
   "*.so"
   "CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o"
   "CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o.d"
+  "CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o"
+  "CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o.d"
   "CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o"
   "CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o.d"
   "CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o"

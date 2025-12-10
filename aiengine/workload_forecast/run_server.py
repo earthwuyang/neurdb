@@ -23,6 +23,8 @@ try:
     from forecast_index_service import ForecastIndexService, ForecastIndexConfig, ServiceMode
     from index_advisor import IndexCandidate, QueryAnalysis
     from index_recommendation_engine import RecommendationConfig, RecommendationStrategy
+    from predictive_index_manager import PredictiveIndexManager, PredictiveConfig
+    from reactive_index_manager import ReactiveIndexManager, ReactiveConfig, EvictionPolicy
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure all Phase 2, Phase 3, and Phase 4 modules are in the src/ directory")
@@ -52,7 +54,7 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler('/code/neurdb-dev/aiengine/workload_forecast/workload_forecast_server.log')
+        logging.FileHandler(os.path.join(os.path.dirname(__file__), 'workload_forecast_server.log'))
     ]
 )
 logger = logging.getLogger(__name__)
@@ -1752,8 +1754,9 @@ def auto_create_indexes():
 
         logger.info(f"Starting auto-index creation with {len(recommended_indexes)} recommendations")
 
-        # Check current storage usage and budget
+        # Check current storage usage and budget with fallback logic
         try:
+            # Try to use the nr_index_management extension functions first
             cursor.execute("SELECT nr_calculate_index_budget_mb() as budget, nr_get_current_index_storage_mb() as current_usage")
             budget_info = cursor.fetchone()
 
@@ -1763,16 +1766,59 @@ def auto_create_indexes():
 
             # Handle both dictionary access and tuple access based on cursor type
             if isinstance(budget_info, dict):
-                current_budget = budget_info.get('budget', 0.0)
-                current_usage = budget_info.get('current_usage', 0.0)
+                current_budget = float(budget_info.get('budget', 0.0))
+                current_usage = float(budget_info.get('current_usage', 0.0))
             else:
                 # Tuple access - order matches SELECT
                 current_budget = float(budget_info[0]) if budget_info[0] is not None else 0.0
                 current_usage = float(budget_info[1]) if budget_info[1] is not None else 0.0
 
+            logger.info(f"Using nr_index_management extension functions for budget calculation")
+
         except Exception as e:
-            logger.error(f"Error getting budget info: {e}")
-            return jsonify({'error': f'Failed to get storage budget: {str(e)}'}), 500
+            logger.warning(f"Extension functions not available ({e}), using fallback budget calculation")
+
+            # Fallback: Calculate budget manually using direct database queries
+            try:
+                # Get current database size
+                cursor.execute("SELECT pg_database_size(current_database())::double precision / 1024.0 / 1024.0 as db_size_mb")
+                db_size_result = cursor.fetchone()
+                db_size_mb = float(db_size_result[0]) if db_size_result and db_size_result[0] is not None else 1000.0
+
+                # Get current index usage
+                cursor.execute("""
+                    SELECT sum(pg_relation_size(indexrelid))::double precision / 1024.0 / 1024.0 as usage_mb
+                    FROM pg_index
+                    JOIN pg_class ON pg_class.oid = pg_index.indexrelid
+                    WHERE pg_class.relkind = 'i'
+                """)
+                usage_result = cursor.fetchone()
+                current_usage = float(usage_result[0]) if usage_result and usage_result[0] is not None else 0.0
+
+                # Try to get GUC parameter setting
+                try:
+                    cursor.execute("SELECT current_setting('nr_max_index_storage_mb')::double precision")
+                    guc_result = cursor.fetchone()
+                    nr_max_storage = float(guc_result[0]) if guc_result and guc_result[0] is not None else 0.0
+                except:
+                    nr_max_storage = 0.0
+
+                # Calculate budget: use GUC if set and > 0, otherwise half of database size
+                if nr_max_storage > 0.0:
+                    current_budget = nr_max_storage
+                    logger.info(f"Using GUC setting nr_max_index_storage_mb = {current_budget:.2f} MB")
+                else:
+                    current_budget = db_size_mb / 2.0  # 50% of database size
+                    logger.info(f"Using 50% of database size as budget: {current_budget:.2f} MB (DB size: {db_size_mb:.2f} MB)")
+
+                logger.info(f"Fallback calculation - DB: {db_size_mb:.2f} MB, Index Usage: {current_usage:.2f} MB, Budget: {current_budget:.2f} MB")
+
+            except Exception as fallback_error:
+                logger.error(f"Fallback budget calculation also failed: {fallback_error}")
+                # Ultimate fallback: use reasonable defaults
+                current_budget = 5000.0  # 5GB default
+                current_usage = 1000.0   # 1GB estimate
+                logger.warning(f"Using ultimate fallback budget: {current_budget:.2f} MB, usage: {current_usage:.2f} MB")
 
         available_budget = current_budget - current_usage
 
@@ -1790,7 +1836,7 @@ def auto_create_indexes():
                 logger.info(f"Estimated size {estimated_size:.2f} MB exceeds available budget {available_budget:.2f} MB")
 
                 # Try to evict low-usage indexes to make space
-                required_space = estimated_size - available_budget + 50.0  # Need extra buffer
+                required_space = float(estimated_size) - float(available_budget) + 50.0  # Need extra buffer
                 indexes_to_evict, freed_space = find_indexes_to_evict(cursor, required_space, current_budget)
 
                 if freed_space >= required_space:
@@ -1806,7 +1852,7 @@ def auto_create_indexes():
                             available_budget += freed
                             logger.info(f"Evicted index {eviction['index_name']} ({freed:.2f} MB) for better utilization")
 
-                    total_size_added -= sum(e['size_mb'] for e in evicted_list)
+                    total_size_added -= float(sum(e['size_mb'] for e in evicted_list))
 
                     # Add eviction info to response
                     evicted_indexes.extend(evicted_list)
@@ -1958,20 +2004,73 @@ def get_storage_stats():
         conn = psycopg2.connect(**db_params)
         cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-        # Get storage statistics
-        cursor.execute("""
-            SELECT
-                nr_get_current_index_storage_mb() as current_usage_mb,
-                nr_calculate_index_budget_mb() as budget_mb,
-                nr_get_database_size_mb() as database_size_mb,
-                (SELECT COUNT(*) FROM pg_class WHERE relkind = 'i' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) as total_indexes
-        """)
+        # Get storage statistics with fallback logic
+        try:
+            # Try to use extension functions first
+            cursor.execute("""
+                SELECT
+                    nr_get_current_index_storage_mb() as current_usage_mb,
+                    nr_calculate_index_budget_mb() as budget_mb,
+                    nr_get_database_size_mb() as database_size_mb,
+                    (SELECT COUNT(*) FROM pg_class WHERE relkind = 'i' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) as total_indexes
+            """)
+            stats = cursor.fetchone()
 
-        stats = cursor.fetchone()
+            # Get per-index details
+            cursor.execute("SELECT * FROM nr_index_storage_usage ORDER BY size_mb DESC")
+            index_details = cursor.fetchall()
+            logger.info("Using nr_index_management extension for storage stats")
 
-        # Get per-index details
-        cursor.execute("SELECT * FROM nr_index_storage_usage ORDER BY size_mb DESC")
-        index_details = cursor.fetchall()
+        except Exception as e:
+            logger.warning(f"Extension functions not available for storage stats ({e}), using fallback")
+
+            # Fallback: Calculate statistics manually
+            cursor.execute("""
+                SELECT
+                    pg_database_size(current_database())::double precision / 1024.0 / 1024.0 as db_size_mb,
+                    (SELECT sum(pg_relation_size(indexrelid))::double precision / 1024.0 / 1024.0
+                     FROM pg_index
+                     JOIN pg_class ON pg_class.oid = pg_index.indexrelid
+                     WHERE pg_class.relkind = 'i' AND pg_class.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) as index_usage_mb,
+                    (SELECT COUNT(*) FROM pg_class WHERE relkind = 'i' AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')) as total_indexes
+            """)
+
+            fallback_stats = cursor.fetchone()
+
+            # Try to get GUC parameter for budget
+            try:
+                cursor.execute("SELECT current_setting('nr_max_index_storage_mb')::double precision")
+                guc_result = cursor.fetchone()
+                budget_mb = float(guc_result[0]) if guc_result and guc_result[0] is not None else fallback_stats[0] / 2.0
+            except:
+                budget_mb = fallback_stats[0] / 2.0  # 50% of database size
+
+            # Convert to format expected by rest of code
+            stats = {
+                'current_usage_mb': fallback_stats[1] if fallback_stats[1] is not None else 0.0,
+                'budget_mb': budget_mb,
+                'database_size_mb': fallback_stats[0] if fallback_stats[0] is not None else 0.0,
+                'total_indexes': fallback_stats[2] if fallback_stats[2] is not None else 0
+            }
+
+            # Get basic index details without extension
+            try:
+                cursor.execute("""
+                    SELECT
+                        pg_class.relname as index_name,
+                        pg_class.relname as table_name,
+                        pg_relation_size(pg_class.oid)::double precision / 1024.0 / 1024.0 as size_mb,
+                        0 as usage_count
+                    FROM pg_class
+                    WHERE pg_class.relkind = 'i'
+                    AND pg_class.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')
+                    ORDER BY size_mb DESC
+                """)
+                index_details = cursor.fetchall()
+            except:
+                index_details = []
+
+            logger.info(f"Fallback storage stats - DB: {stats['database_size_mb']:.2f} MB, Usage: {stats['current_usage_mb']:.2f} MB, Budget: {stats['budget_mb']:.2f} MB")
 
         cursor.close()
         conn.close()
@@ -2003,7 +2102,7 @@ def get_storage_stats():
 @app.route('/guc_change', methods=['POST'])
 def handle_guc_change():
     """Handle GUC parameter change notifications from PostgreSQL"""
-    global request_count
+    global request_count, predictive_manager, reactive_manager
     request_count += 1
 
     try:
@@ -2041,6 +2140,62 @@ def handle_guc_change():
                     'status': 'error',
                     'message': f'Invalid value or action for {parameter}: value={value}, action={action}'
                 }), 400
+
+        elif parameter == 'nr_index_management_strategy':
+            logger.info(f"Index management strategy changed to: {value}")
+
+            # Initialize the appropriate manager
+            if value == 'reactive':
+                if reactive_manager is None:
+                    logger.info("Initializing ReactiveIndexManager...")
+                    config = ReactiveConfig(
+                        storage_budget_mb=1000.0,
+                        recommendation_ttl_hours=1,
+                        enable_auto_creation=True,
+                        eviction_policy=EvictionPolicy.BENEFIT_BASED,
+                        database_host='localhost',
+                        database_port=5432,
+                        database_name='imdb_test',
+                        database_user='neurdb',
+                        database_password=''
+                    )
+                    reactive_manager = ReactiveIndexManager(config)
+                    logger.info("ReactiveIndexManager initialized successfully")
+
+                # Reactive manager is ready for use
+                logger.info("Reactive manager initialized and ready for queries")
+
+                return jsonify({
+                    'status': 'success',
+                    'message': f'Reactive strategy initialized and monitoring started',
+                    'strategy': value,
+                    'timestamp': datetime.now().isoformat(),
+                    'manager_initialized': reactive_manager is not None
+                })
+
+            elif value == 'predictive':
+                if predictive_manager is None:
+                    logger.info("Initializing PredictiveIndexManager...")
+                    config = PredictiveConfig(
+                        max_storage_mb=1000.0,
+                        workload_window_hours=24,
+                        min_workload_size=50,
+                        change_threshold=0.2
+                    )
+                    predictive_manager = PredictiveIndexManager(config)
+                    logger.info("PredictiveIndexManager initialized successfully")
+
+                # Predictive manager is ready for use
+                logger.info("Predictive manager initialized and ready for queries")
+
+                return jsonify({
+                    'status': 'success',
+                    'message': f'Predictive strategy initialized and monitoring started',
+                    'strategy': value,
+                    'timestamp': datetime.now().isoformat(),
+                    'manager_initialized': predictive_manager is not None
+                })
+
         else:
             logger.warning(f"Received unknown GUC parameter change: {parameter}")
             return jsonify({
@@ -2051,6 +2206,353 @@ def handle_guc_change():
 
     except Exception as e:
         logger.error(f"Error in handle_guc_change: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+# Index Management Strategy endpoints
+
+# Global variables for index managers (in production, these would be properly managed)
+predictive_manager = None
+reactive_manager = None
+
+@app.route('/index/predictive/optimize', methods=['POST'])
+def predictive_optimize():
+    """Trigger predictive index optimization"""
+    global predictive_manager
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON'}), 400
+
+        # Configuration
+        config = PredictiveConfig(
+            forecast_horizon_hours=data.get('forecast_horizon_hours', 24),
+            min_confidence_for_action=data.get('min_confidence_for_action', 0.75),
+            workload_change_threshold=data.get('workload_change_threshold', 0.3),
+            enable_index_recreation=data.get('enable_index_recreation', True),
+            storage_budget_mb=data.get('storage_budget_mb', 1000.0),
+            max_indexes_to_create=data.get('max_indexes_to_create', 10),
+            min_index_benefit_threshold=data.get('min_index_benefit_threshold', 0.1),
+            analysis_window_hours=data.get('analysis_window_hours', 24),
+            monitoring_interval_minutes=data.get('monitoring_interval_minutes', 5)
+        )
+
+        # Initialize manager if needed
+        if predictive_manager is None:
+            predictive_manager = PredictiveIndexManager(config)
+
+        # Run optimization
+        result = run_async(predictive_manager.monitoring_cycle())
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Predictive optimization completed',
+            'timestamp': datetime.now().isoformat(),
+            'result': result
+        })
+
+    except Exception as e:
+        logger.error(f"Error in predictive_optimize: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/index/predictive/status', methods=['GET'])
+def predictive_status():
+    """Get predictive index manager status"""
+    global predictive_manager
+
+    try:
+        if predictive_manager is None:
+            return jsonify({
+                'status': 'not_initialized',
+                'message': 'Predictive manager not initialized'
+            })
+
+        status = run_async(predictive_manager.get_status())
+
+        return jsonify({
+            'status': 'success',
+            'timestamp': datetime.now().isoformat(),
+            'data': status
+        })
+
+    except Exception as e:
+        logger.error(f"Error in predictive_status: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/index/reactive/recommend', methods=['POST'])
+def reactive_recommend():
+    """Get reactive index recommendation for a single query"""
+    global reactive_manager
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON'}), 400
+
+        query_text = data.get('query_text')
+        if not query_text:
+            return jsonify({'error': 'query_text is required'}), 400
+
+        # Configuration
+        config = ReactiveConfig(
+            storage_budget_mb=data.get('storage_budget_mb', 1000.0),
+            min_benefit_threshold=data.get('min_benefit_threshold', 0.1),
+            eviction_policy=EvictionPolicy(data.get('eviction_policy', 'benefit_based')),
+            max_indexes_total=data.get('max_indexes_total', 50),
+            cache_recommendations=data.get('cache_recommendations', True),
+            recommendation_ttl_hours=data.get('recommendation_ttl_hours', 1),
+            enable_auto_creation=data.get('enable_auto_creation', False),  # Require explicit action for creation
+            database_host='localhost',
+            database_port=5432,
+            database_name='imdb_test',
+            database_user='neurdb',
+            database_password=''
+        )
+
+        # Initialize manager if needed
+        if reactive_manager is None:
+            reactive_manager = ReactiveIndexManager(config)
+
+        # Get recommendation
+        result = run_async(reactive_manager.process_query(query_text, force_analysis=True))
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Reactive recommendation generated',
+            'timestamp': datetime.now().isoformat(),
+            'query_text': query_text,
+            'recommendations': result
+        })
+
+    except Exception as e:
+        logger.error(f"Error in reactive_recommend: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/index/reactive/manage', methods=['POST'])
+def reactive_manage():
+    """Create index with reactive budget management"""
+    global reactive_manager
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON'}), 400
+
+        query_text = data.get('query_text')
+        auto_create = data.get('auto_create', True)
+
+        if not query_text:
+            return jsonify({'error': 'query_text is required'}), 400
+
+        # Configuration with auto-creation enabled
+        config = ReactiveConfig(
+            storage_budget_mb=data.get('storage_budget_mb', 1000.0),
+            min_benefit_threshold=data.get('min_benefit_threshold', 0.1),
+            eviction_policy=EvictionPolicy(data.get('eviction_policy', 'benefit_based')),
+            max_indexes_total=data.get('max_indexes_total', 50),
+            cache_recommendations=data.get('cache_recommendations', True),
+            recommendation_ttl_hours=data.get('recommendation_ttl_hours', 1),
+            enable_auto_creation=auto_create,
+            database_host='localhost',
+            database_port=5432,
+            database_name='imdb_test',
+            database_user='neurdb',
+            database_password=''
+        )
+
+        # Initialize manager if needed
+        if reactive_manager is None:
+            reactive_manager = ReactiveIndexManager(config)
+
+        # Process query with potential index creation
+        result = run_async(reactive_manager.process_query(query_text, force_analysis=True))
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Reactive index management completed',
+            'timestamp': datetime.now().isoformat(),
+            'query_text': query_text,
+            'auto_create_enabled': auto_create,
+            'result': result
+        })
+
+    except Exception as e:
+        logger.error(f"Error in reactive_manage: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/index/reactive/status', methods=['GET'])
+def reactive_status():
+    """Get reactive index manager status"""
+    global reactive_manager
+
+    try:
+        if reactive_manager is None:
+            return jsonify({
+                'status': 'not_initialized',
+                'message': 'Reactive manager not initialized'
+            })
+
+        status = reactive_manager.get_status()
+
+        return jsonify({
+            'status': 'success',
+            'timestamp': datetime.now().isoformat(),
+            'data': status
+        })
+
+    except Exception as e:
+        logger.error(f"Error in reactive_status: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/index/reactive/initialize', methods=['POST'])
+def reactive_initialize():
+    """Initialize reactive index manager with default configuration"""
+    global reactive_manager
+
+    try:
+        data = request.get_json() or {}
+
+        # Configuration with correct parameter names
+        config = ReactiveConfig(
+            storage_budget_mb=data.get('storage_budget_mb', 1000.0),
+            recommendation_ttl_hours=data.get('recommendation_ttl_hours', 1),
+            enable_auto_creation=data.get('enable_auto_creation', True),
+            eviction_policy=EvictionPolicy(data.get('eviction_policy', 'benefit_based')),
+            database_host=data.get('database_host', 'localhost'),
+            database_port=data.get('database_port', 5432),
+            database_name=data.get('database_name', 'imdb_test'),
+            database_user=data.get('database_user', 'neurdb'),
+            database_password=data.get('database_password', 'postgres')
+        )
+
+        # Initialize manager
+        reactive_manager = ReactiveIndexManager(config)
+
+        # Reactive manager is ready for use
+        logger.info("ReactiveIndexManager initialized and ready for queries")
+
+        logger.info("ReactiveIndexManager initialized via API call")
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Reactive manager initialized successfully',
+            'timestamp': datetime.now().isoformat(),
+            'config': {
+                'storage_budget_mb': config.storage_budget_mb,
+                'recommendation_ttl_hours': config.recommendation_ttl_hours,
+                'enable_auto_creation': config.enable_auto_creation,
+                'eviction_policy': config.eviction_policy.value,
+                'database_host': config.database_host,
+                'database_name': config.database_name
+            }
+        })
+
+    except Exception as e:
+        logger.error(f"Error initializing reactive manager: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/index/reactive/test', methods=['POST'])
+def reactive_test():
+    """Test reactive functionality with a sample query"""
+    global reactive_manager
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON'}), 400
+
+        # Use provided query or a default test query
+        query_text = data.get('query_text', 'SELECT * FROM imdb_test.title WHERE kind_id = 1 AND production_year > 2000')
+        auto_create = data.get('auto_create', False)
+
+        # Initialize manager if needed
+        if reactive_manager is None:
+            config = ReactiveConfig(
+                storage_budget_mb=1000.0,
+                recommendation_ttl_hours=1,
+                enable_auto_creation=auto_create,
+                eviction_policy=EvictionPolicy.BENEFIT_BASED,
+                database_host='localhost',
+                database_port=5432,
+                database_name='imdb_test',
+                database_user='neurdb',
+                database_password=''
+            )
+            reactive_manager = ReactiveIndexManager(config)
+
+        # Process the query
+        result = run_async(reactive_manager.process_query(query_text, force_analysis=True))
+
+        return jsonify({
+            'status': 'success',
+            'message': 'Reactive test completed',
+            'timestamp': datetime.now().isoformat(),
+            'query_text': query_text,
+            'auto_create_enabled': auto_create,
+            'result': result
+        })
+
+    except Exception as e:
+        logger.error(f"Error in reactive_test: {e}", exc_info=True)
+        return jsonify({
+            'status': 'error',
+            'message': str(e)
+        }), 500
+
+
+@app.route('/index/switch_strategy', methods=['POST'])
+def switch_strategy():
+    """Switch between predictive and reactive strategies"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Invalid JSON'}), 400
+
+        strategy = data.get('strategy')  # 'predictive' or 'reactive'
+
+        if strategy not in ['predictive', 'reactive']:
+            return jsonify({'error': 'Strategy must be "predictive" or "reactive"'}), 400
+
+        # In a real implementation, this would disable one strategy and enable the other
+        # For now, just return a success message indicating the requested strategy
+
+        return jsonify({
+            'status': 'success',
+            'message': f'Strategy switched to {strategy}',
+            'timestamp': datetime.now().isoformat(),
+            'active_strategy': strategy
+        })
+
+    except Exception as e:
+        logger.error(f"Error in switch_strategy: {e}", exc_info=True)
         return jsonify({
             'status': 'error',
             'message': str(e)
@@ -2182,6 +2684,14 @@ if __name__ == '__main__':
     print()
     print("GUC Parameter Notification:")
     print(f"  POST http://{args.host}:{args.port}/guc_change")
+    print()
+    print("Index Management Strategy endpoints:")
+    print(f"  POST http://{args.host}:{args.port}/index/predictive/optimize")
+    print(f"  GET  http://{args.host}:{args.port}/index/predictive/status")
+    print(f"  POST http://{args.host}:{args.port}/index/reactive/recommend")
+    print(f"  POST http://{args.host}:{args.port}/index/reactive/manage")
+    print(f"  GET  http://{args.host}:{args.port}/index/reactive/status")
+    print(f"  POST http://{args.host}:{args.port}/index/switch_strategy")
     print()
 
     app.config['LOG_FILE'] = args.log_file

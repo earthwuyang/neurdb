@@ -127,10 +127,33 @@ class HypoPGCostModel:
                 result = cursor.fetchone()
                 logger.info(f"HypPG result: {result}")
 
-                if result and result[0] > 0:
-                    index_oid = result[0]
+                if result and result[0]:
+                    # Parse the HypoPG result to extract the OID
+                    # HypoPG typically returns a tuple with OID information
+                    index_info = str(result[0])
+
+                    # Try to extract OID from the result string
+                    # Format might be "(oid,<oid>btree_name)" or just the OID
+                    if '(' in index_info and ')' in index_info:
+                        # Extract the OID from the tuple representation
+                        oid_str = index_info.split('(')[1].split(',')[0]
+                        try:
+                            index_oid = int(oid_str)
+                            conn.close()
+                            return index_oid
+                        except ValueError:
+                            logger.warning(f"Could not parse OID from HypoPG result: {oid_str}")
+                    else:
+                        # Try to parse directly as integer
+                        try:
+                            index_oid = int(index_info)
+                            conn.close()
+                            return index_oid
+                        except ValueError:
+                            logger.warning(f"Could not parse OID from HypoPG result: {index_info}")
+
                     conn.close()
-                    return index_oid
+                    return None
                 else:
                     conn.close()
                     return None
@@ -168,7 +191,7 @@ class HypoPGCostModel:
             # Get execution plan with hypothetical indexes
             conn = psycopg2.connect(**self.db_params)
             with conn.cursor() as cursor:
-                explain_sql = f"EXPLAIN (FORMAT JSON, ANALYZE, BUFFERS) {query}"
+                explain_sql = f"EXPLAIN (FORMAT JSON) {query}"
                 cursor.execute(explain_sql)
                 plan_result = cursor.fetchone()
 
@@ -186,16 +209,70 @@ class HypoPGCostModel:
                     # Psycopg2 already parsed the JSON
                     plan_data = plan_result[0][0]['Plan']
 
+                # Extract cost values and ensure they are numeric
+                logger.debug(f"Plan data keys: {list(plan_data.keys())}")
+
+                # The root plan contains the main execution cost
+                startup_cost = plan_data.get('Startup Cost', 0.0)
+                total_cost = plan_data.get('Total Cost', 0.0)
+                # Without ANALYZE, we don't have actual execution time, only cost estimates
+                execution_time = 0.0  # Set to 0 since we're not using ANALYZE
+
+                logger.debug(f"Raw values - Startup Cost: {startup_cost}, Total Cost: {total_cost}, Execution Time: {execution_time}")
+
+                # Convert to float if they're strings
+                try:
+                    startup_cost = float(startup_cost)
+                    logger.debug(f"Parsed startup_cost: {startup_cost}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse startup_cost '{startup_cost}': {e}")
+                    startup_cost = 0.0
+
+                try:
+                    total_cost = float(total_cost)
+                    logger.debug(f"Parsed total_cost: {total_cost}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to parse total_cost '{total_cost}': {e}")
+                    total_cost = 0.0
+
+                # Skip execution_time parsing since we're not using ANALYZE
+                logger.debug("Skipping execution_time parsing - using EXPLAIN without ANALYZE")
+
+                # Use total_cost as the primary decision metric for overall query optimization
+                logger.info(f"Extracted costs - startup_cost={startup_cost:.2f}, total_cost={total_cost:.2f}, execution_time={execution_time:.2f}")
+
+                # Log identical costs for debugging
+                logger.info(f"Cost extraction completed - startup_cost={startup_cost:.2f}, total_cost={total_cost:.2f}")
+
+                # Handle blocks - they should come from the execution plan
+                shared_hit_blocks = 0
+                shared_read_blocks = 0
+                if 'Shared Hit Blocks' in plan_data:
+                    shared_hit_blocks = plan_data.get('Shared Hit Blocks', 0)
+                if 'Shared Read Blocks' in plan_data:
+                    shared_read_blocks = plan_data.get('Shared Read Blocks', 0)
+
+                try:
+                    shared_hit_blocks = int(shared_hit_blocks)
+                except (ValueError, TypeError):
+                    shared_hit_blocks = 0
+
+                try:
+                    shared_read_blocks = int(shared_read_blocks)
+                except (ValueError, TypeError):
+                    shared_read_blocks = 0
+
                 return {
-                    'total_cost': plan_data.get('Total Cost', 0.0),
-                    'execution_time': plan_data.get('Actual Total Time', 0.0),
-                    'shared_blocks': plan_data.get('Shared Hit Blocks', 0) + plan_data.get('Shared Read Blocks', 0),
+                    'startup_cost': startup_cost,
+                    'total_cost': total_cost,
+                    'execution_time': execution_time,
+                    'shared_blocks': shared_hit_blocks + shared_read_blocks,
                     'plan_nodes': len([node for node in self._extract_all_plan_nodes(plan_data)])
                 }
 
         except Exception as e:
             logger.error(f"Failed to estimate query cost: {e}")
-            return {'total_cost': 0.0, 'execution_time': 0.0, 'shared_blocks': 0}
+            return {'startup_cost': 0.0, 'total_cost': 0.0, 'execution_time': 0.0, 'shared_blocks': 0}
 
     def _extract_all_plan_nodes(self, plan_node):
         """Extract all plan nodes from PostgreSQL explain output"""
@@ -235,11 +312,11 @@ class IndexSearchSpace:
         logger.info(f"Sorted columns: {sorted_columns}")
 
         # Generate index candidates for most frequently used columns
-        for table_column, usage_count in sorted_columns[:50]:  # Limit to top 50 columns
+        for col, usage_count in sorted_columns[:50]:  # Limit to top 50 columns
             if usage_count >= 1:  # Lower minimum threshold for testing
                 # Parse table.column format
-                if '.' in table_column:
-                    table_name, column_name = table_column.split('.', 1)
+                if '.' in col:
+                    table_name, column_name = col.split('.', 1)
                     logger.info(f"Creating candidate for {table_name}.{column_name} (usage: {usage_count})")
                     candidates.append(IndexCandidate(
                         table_name=table_name,
@@ -282,91 +359,53 @@ class IndexSearchSpace:
         """Extract column references from query using robust SQL parsing"""
         columns = defaultdict(int)
 
-        try:
-            # Parse the SQL query
-            parsed = sqlparse.parse(query)[0]
-
-            # Helper function to extract columns from identifiers
-            def extract_columns_from_token(token):
-                if isinstance(token, sqlparse.sql.Identifier):
-                    # Handle table.column format
-                    token_str = str(token)
-                    if '.' in token_str:
-                        parts = token_str.split('.')
-                        if len(parts) >= 2:
-                            table_name = parts[0].strip('"')
-                            column_name = '.'.join(parts[1:]).strip('"')
-                            return f"{table_name}.{column_name}"
-                    return token_str
-                elif isinstance(token, sqlparse.sql.IdentifierList):
-                    # Handle multiple columns
-                    cols = []
-                    for identifier in token.get_identifiers():
-                        col = extract_columns_from_token(identifier)
-                        if col:
-                            cols.append(col)
-                    return cols
-                elif isinstance(token, sqlparse.sql.Function):
-                    # Handle function calls like COUNT(t.id)
-                    cols = []
-                    for param in token.get_parameters():
-                        col = extract_columns_from_token(param)
-                        if col:
-                            cols.append(col)
-                    return cols
-                return None
-
-            # Extract columns from identifiers recursively
-            def extract_identifiers(tokens):
-                for token in tokens:
-                    if isinstance(token, sqlparse.sql.Identifier):
-                        col = extract_columns_from_token(token)
-                        if col:
-                            if isinstance(col, list):
-                                for c in col:
-                                    if c and len(c) > 0:
-                                        columns[c] += 1
-                            elif isinstance(col, str) and len(col) > 0:
-                                columns[col] += 1
-                    # Also handle comparison expressions in WHERE clause
-                    elif isinstance(token, sqlparse.sql.Comparison):
-                        # Extract columns from left side of comparison (e.g., production_year = 2000)
-                        if hasattr(token, 'left'):
-                            left_cols = extract_columns_from_token(token.left)
-                            if left_cols:
-                                if isinstance(left_cols, list):
-                                    for c in left_cols:
-                                        if c and len(c) > 0:
-                                            columns[c] += 1
-                                elif isinstance(left_cols, str) and len(left_cols) > 0:
-                                    columns[left_cols] += 1
-                    elif isinstance(token, sqlparse.sql.IdentifierList):
-                        extract_identifiers(token.get_identifiers())
-                    elif isinstance(token, sqlparse.sql.Function):
-                        # Check function parameters
-                        for param in token.get_parameters():
-                            col = extract_columns_from_token(param)
-                            if col:
-                                if isinstance(col, list):
-                                    for c in col:
-                                        if c and len(c) > 0:
-                                            columns[c] += 1
-                                elif isinstance(col, str) and len(col) > 0:
-                                    columns[col] += 1
-                    # Recursively check child tokens
-                    if hasattr(token, 'tokens'):
-                        extract_identifiers(token.tokens)
-
-            # Start extraction from the parsed query
-            extract_identifiers(parsed.tokens)
-
-        except Exception as e:
-            logger.warning(f"SQL parsing failed for query: {query[:100]}... - {e}")
-            # Fallback to simple regex extraction
-            column_pattern = r'\b(\w+)\.(\w+)\b'
-            for match in re.finditer(column_pattern, query):
-                table, column = match.groups()
+        # First try regex-based extraction for table.column patterns (more reliable)
+        column_pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)\b'
+        for match in re.finditer(column_pattern, query):
+            table, column = match.groups()
+            # Skip common SQL keywords that might match the pattern
+            if table.lower() not in ['order', 'group', 'having', 'where', 'from', 'select', 'join']:
                 columns[f"{table}.{column}"] += 1
+
+        # If regex found table.column patterns, use those directly
+        if columns:
+            return columns
+
+        # Extract table names from FROM clause to handle bare column references
+        table_pattern = r'\bFROM\s+([a-zA-Z_][a-zA-Z0-9_]*)\b'
+        tables = set()
+        for match in re.finditer(table_pattern, query, re.IGNORECASE):
+            table_name = match.group(1)
+            if table_name.lower() not in ['where', 'having', 'group', 'order']:
+                tables.add(table_name)
+
+        # Extract bare column names (not table.column) from WHERE clause and other parts
+        # Look for columns in WHERE, ORDER BY, GROUP BY, SELECT (but not FROM table names)
+        bare_column_pattern = r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\.)'
+
+        # Find all potential column names, then filter out SQL keywords
+        all_candidates = re.findall(bare_column_pattern, query)
+        sql_keywords = {
+            'select', 'from', 'where', 'and', 'or', 'order', 'by', 'group', 'having',
+            'limit', 'offset', 'join', 'on', 'inner', 'left', 'right', 'full', 'outer',
+            'as', 'distinct', 'all', 'between', 'in', 'like', 'is', 'null', 'not',
+            'asc', 'desc', 'union', 'intersect', 'except', 'case', 'when', 'then', 'else', 'end'
+        }
+
+        # Filter out SQL keywords and table names
+        for candidate in all_candidates:
+            candidate_lower = candidate.lower()
+            if (candidate_lower not in sql_keywords and
+                candidate_lower not in [t.lower() for t in tables] and
+                len(candidate) > 1):  # Skip single letters
+                # If we have exactly one table, qualify the column name
+                if len(tables) == 1:
+                    table_name = list(tables)[0]
+                    columns[f"{table_name}.{candidate}"] += 1
+                else:
+                    # Multiple tables - we can't determine which table this column belongs to
+                    # Skip ambiguous bare column references for now
+                    pass
 
         return columns
 
@@ -472,7 +511,7 @@ class AnytimeIndexOptimizer:
         quality_improvements.append((0, best_solution.benefit_score))
 
         # Phase 4: Greedy single-index optimization
-        greedy_solution = self.greedy_single_index(workload, all_candidates)
+        greedy_solution = self.greedy_single_index(workload, all_candidates, self.baseline_costs)
         if greedy_solution.benefit_score > best_solution.benefit_score:
             improvement_time = time.time() - start_time
             best_solution = greedy_solution
@@ -481,7 +520,7 @@ class AnytimeIndexOptimizer:
 
         # Phase 5: Iterative local search
         while time.time() - start_time < self.time_limit_seconds * 0.7:  # Use 70% of time for local search
-            improved_solution = self.local_search(best_solution, workload, all_candidates[:50])  # Limit to top 50 candidates
+            improved_solution = self.local_search(best_solution, workload, all_candidates[:50], self.baseline_costs)  # Limit to top 50 candidates
             if improved_solution.benefit_score > best_solution.benefit_score:
                 improvement_time = time.time() - start_time
                 best_solution = improved_solution
@@ -499,7 +538,7 @@ class AnytimeIndexOptimizer:
 
         return ProgressiveResult(best_solution, quality_improvements, optimization_time)
 
-    def greedy_single_index(self, workload: List[QueryCostInfo], candidates: List[IndexCandidate]) -> IndexConfiguration:
+    def greedy_single_index(self, workload: List[QueryCostInfo], candidates: List[IndexCandidate], baseline_costs: Dict[str, QueryCostInfo]) -> IndexConfiguration:
         """Greedy algorithm adding best single index repeatedly"""
         current_config = IndexConfiguration(indexes=[])
         remaining_budget = self.search_space.max_total_indexes
@@ -524,22 +563,28 @@ class AnytimeIndexOptimizer:
                 current_config = current_config + best_candidate
                 remaining_budget -= 1
                 candidates.remove(best_candidate)
+                # Update the benefit_score for the configuration
+                current_config.benefit_score = self._calculate_solution_cost(workload, baseline_costs, current_config)
                 logger.info(f"Added index: {best_candidate.table_name}({', '.join(best_candidate.columns)}) improvement: {best_improvement:.4f}")
             else:
                 logger.info(f"No index added - best_improvement: {best_improvement:.4f}, remaining candidates: {len(candidates)}")
                 break
 
+        # Ensure benefit_score is set even if no indexes were added
+        if current_config.benefit_score == 0.0:
+            current_config.benefit_score = self._calculate_solution_cost(workload, baseline_costs, current_config)
+
         return current_config
 
-    def local_search(self, current_solution: IndexConfiguration, workload: List[QueryCostInfo], candidates: List[IndexCandidate]) -> IndexConfiguration:
+    def local_search(self, current_solution: IndexConfiguration, workload: List[QueryCostInfo], candidates: List[IndexCandidate], baseline_costs: Dict[str, QueryCostInfo]) -> IndexConfiguration:
         """Local search starting from current solution"""
         best_solution = current_solution
-        best_score = self._calculate_solution_cost(workload, {}, current_solution)
+        best_score = self._calculate_solution_cost(workload, baseline_costs, current_solution)
 
         # Try removing existing indexes
         for i, existing_index in enumerate(current_solution.indexes):
             test_config = IndexConfiguration(indexes=current_solution.indexes[:i] + current_solution.indexes[i+1:])
-            score = self._calculate_solution_cost(workload, {}, test_config)
+            score = self._calculate_solution_cost(workload, baseline_costs, test_config)
             if score > best_score:
                 best_solution = test_config
                 best_score = score
@@ -553,7 +598,7 @@ class AnytimeIndexOptimizer:
                 test_config = IndexConfiguration(
                     indexes=current_solution.indexes[:i] + [candidate] + current_solution.indexes[i+1:]
                 )
-                score = self._calculate_solution_cost(workload, {}, test_config)
+                score = self._calculate_solution_cost(workload, baseline_costs, test_config)
                 if score > best_score:
                     best_solution = test_config
                     best_score = score
@@ -563,16 +608,34 @@ class AnytimeIndexOptimizer:
     def _calculate_baseline_costs(self, workload: List[QueryCostInfo]) -> Dict[str, QueryCostInfo]:
         """Calculate baseline costs without any indexes"""
         baseline_costs = {}
+        logger.debug(f"Calculating baseline costs for {len(workload)} queries")
+
         for query_info in workload:
+            logger.debug(f"Processing query for baseline: {query_info.query[:100]}...")
+            logger.debug(f"QueryInfo template_hash: '{query_info.template_hash}'")
+
             cost_info = self.cost_model.estimate_query_cost(query_info.query, IndexConfiguration(indexes=[]))
-            baseline_costs[query_info.template_hash] = QueryCostInfo(
+            logger.debug(f"Baseline cost info: startup_cost={cost_info.get('startup_cost', 0)}, total_cost={cost_info.get('total_cost', 0)}, execution_time={cost_info.get('execution_time', 0)}")
+
+            # Create a template hash if missing
+            template_hash = query_info.template_hash
+            if not template_hash:
+                # Simple hash of the query for now
+                import hashlib
+                template_hash = hashlib.md5(query_info.query.encode()).hexdigest()
+                logger.debug(f"Generated template hash: {template_hash}")
+
+            baseline_costs[template_hash] = QueryCostInfo(
                 query=query_info.query,
-                template_hash=query_info.template_hash,
+                template_hash=template_hash,
                 frequency=query_info.frequency,
-                base_cost=cost_info['total_cost'],
+                base_cost=cost_info['total_cost'],  # Use total_cost for overall query optimization
                 base_time=cost_info['execution_time'],
                 base_io=cost_info['shared_blocks']
             )
+            logger.debug(f"Baseline cost stored for {template_hash}: startup_cost={cost_info['startup_cost']}, total_cost={cost_info['total_cost']}")
+
+        logger.debug(f"Baseline costs calculated: {len(baseline_costs)} entries")
         return baseline_costs
 
     def _calculate_solution_cost(self, workload: List[QueryCostInfo], baseline_costs: Dict[str, QueryCostInfo],
@@ -580,26 +643,51 @@ class AnytimeIndexOptimizer:
         """Calculate total benefit score for a configuration"""
         total_cost = 0.0
         total_improvement = 0.0
+        logger.debug(f"Calculating solution cost for {len(workload)} queries, {len(baseline_costs)} baseline entries")
 
         for query_info in workload:
+            logger.debug(f"Processing query in solution_cost: template_hash='{query_info.template_hash}'")
+            logger.debug(f"Available baseline hashes: {list(baseline_costs.keys())}")
+
             if query_info.template_hash in baseline_costs:
                 baseline = baseline_costs[query_info.template_hash]
+                logger.debug(f"Found baseline: base_cost={baseline.base_cost}, base_time={baseline.base_time}")
+
                 optimized_costs = self.cost_model.estimate_query_cost(query_info.query, index_config)
+                logger.debug(f"Optimized costs: {optimized_costs}")
 
                 # Calculate improvement metrics
                 if baseline and baseline.base_cost and baseline.base_cost > 0:
-                    cost_improvement = (baseline.base_cost - optimized_costs['total_cost']) / baseline.base_cost
+                    baseline_cost = float(baseline.base_cost)
+                    optimized_cost = float(optimized_costs['total_cost'])
+                    cost_improvement = (baseline_cost - optimized_cost) / baseline_cost
+                    logger.debug(f"Cost improvement calculation: baseline={baseline_cost}, optimized={optimized_cost}, improvement={cost_improvement}")
                 else:
                     cost_improvement = 0.0
+                    logger.debug(f"No valid baseline cost: baseline={baseline}, base_cost={baseline.base_cost if baseline else 'None'}")
+            else:
+                logger.debug(f"No baseline found for template_hash: {query_info.template_hash}")
+                cost_improvement = 0.0
+                time_improvement = 0.0
 
-                if baseline and baseline.base_time and baseline.base_time > 0:
-                    time_improvement = (baseline.base_time - optimized_costs['execution_time']) / baseline.base_time
-                else:
-                    time_improvement = 0.0
+            # Initialize baseline for time calculation
+            baseline_for_time = None
+            if query_info.template_hash in baseline_costs:
+                baseline_for_time = baseline_costs[query_info.template_hash]
 
-                # Weighted improvement based on query frequency
-                weighted_improvement = (cost_improvement * 0.7 + time_improvement * 0.3) * query_info.frequency
-                total_improvement += weighted_improvement
+            if baseline_for_time and baseline_for_time.base_time and baseline_for_time.base_time > 0:
+                baseline_time = float(baseline_for_time.base_time)
+                optimized_time = float(optimized_costs['execution_time'])
+                time_improvement = (baseline_time - optimized_time) / baseline_time
+                logger.debug(f"Time improvement: baseline={baseline_time}, optimized={optimized_time}, improvement={time_improvement}")
+            else:
+                time_improvement = 0.0
+                logger.debug(f"No valid baseline time")
+
+            # Weighted improvement based on query frequency
+            weighted_improvement = (cost_improvement * 0.7 + time_improvement * 0.3) * query_info.frequency
+            total_improvement += weighted_improvement
+            logger.debug(f"Weighted improvement for query: {weighted_improvement}, total so far: {total_improvement}")
 
         # Subtract storage and maintenance costs
         storage_penalty = index_config.storage_cost * 0.1  # 10% weight for storage
@@ -613,8 +701,20 @@ class AnytimeIndexOptimizer:
         logger.debug(f"Calculating improvement: old_config has {len(old_config.indexes)} indexes, new_config has {len(new_config.indexes)} indexes")
         old_score = self._calculate_solution_cost(workload, self.baseline_costs, old_config)
         new_score = self._calculate_solution_cost(workload, self.baseline_costs, new_config)
-        improvement = new_score - old_score
+
+        # Improvement = old_cost - new_cost (positive improvement means cost reduction)
+        improvement = old_score - new_score
+
         logger.info(f"Individual index improvement: {improvement:.6f} (old: {old_score:.6f}, new: {new_score:.6f})")
+
+        # Add clarification about what the values mean
+        if improvement > 0:
+            logger.debug(f"✅ Positive improvement: Index reduces cost by {improvement:.6f}")
+        elif improvement < 0:
+            logger.debug(f"❌ Negative improvement: Index increases cost by {-improvement:.6f}")
+        else:
+            logger.debug(f"➖ No improvement: Index has no cost impact")
+
         return improvement
 
 

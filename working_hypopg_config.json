@@ -1,0 +1,7 @@
+{
+  "host": "localhost",
+  "port": 15432,
+  "database": "imdb_test",
+  "user": "neurdb",
+  "password": ""
+}

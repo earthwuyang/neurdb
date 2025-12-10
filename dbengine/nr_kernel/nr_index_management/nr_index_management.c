@@ -17,6 +17,7 @@
 #include "utils/syscache.h"
 #include "catalog/pg_class.h"
 #include "catalog/pg_index.h"
+#include "utils/guc.h"  /* PostgreSQL GUC API */
 
 #include "neurdb/guc.h"
 
@@ -103,31 +104,49 @@ nr_calculate_index_budget_mb(PG_FUNCTION_ARGS)
 {
     double budget_mb;
 
+    /* Primary method: use PostgreSQL's GUC API to get the current setting */
+    const char *guc_value = GetConfigOption("nr_max_index_storage_mb", false, false);
+    if (guc_value != NULL)
+    {
+        budget_mb = atof(guc_value);
+        if (budget_mb > 0.0)
+        {
+            elog(DEBUG1, "Using GUC nr_max_index_storage_mb = %.2f MB", budget_mb);
+            PG_RETURN_FLOAT8(budget_mb);
+        }
+    }
+
+    /* Fallback: try the global variable if GUC API fails */
     if (nr_max_index_storage_mb > 0.0)
     {
         budget_mb = nr_max_index_storage_mb;
+        elog(DEBUG1, "Using global nr_max_index_storage_mb = %.2f MB", budget_mb);
+        PG_RETURN_FLOAT8(budget_mb);
     }
-    else
+
+    /* If GUC is 0 or not set, calculate as half of database size */
+    if (SPI_connect() != SPI_OK_CONNECT)
+        elog(ERROR, "SPI_connect failed");
+
+    if (SPI_execute("SELECT pg_database_size(current_database())::double precision / 1024.0 / 1024.0", true, 1) == SPI_OK_SELECT && SPI_processed > 0)
     {
-        /* Auto-calculate as half of database size */
-        double db_size_mb = 0.0;
-
-        if (SPI_connect() != SPI_OK_CONNECT)
-            elog(ERROR, "SPI_connect failed");
-
-        if (SPI_execute("SELECT pg_database_size(current_database())::double precision / 1024.0 / 1024.0", true, 1) == SPI_OK_SELECT && SPI_processed > 0)
+        bool isnull;
+        Datum size_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
         {
-            bool isnull;
-            Datum size_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-            if (!isnull)
-                db_size_mb = DatumGetFloat8(size_datum);
+            double db_size_mb = DatumGetFloat8(size_datum);
+            budget_mb = db_size_mb / 2.0;  /* Half of database size */
+            SPI_finish();
+            elog(DEBUG1, "Using calculated budget (50%% of DB size) = %.2f MB", budget_mb);
+            PG_RETURN_FLOAT8(budget_mb);
         }
-
-        SPI_finish();
-        budget_mb = db_size_mb / 2.0;  /* Half of database size */
     }
 
-    PG_RETURN_FLOAT8(budget_mb);
+    SPI_finish();
+
+    /* Ultimate fallback */
+    elog(DEBUG1, "Using default budget of 1057.10 MB");
+    PG_RETURN_FLOAT8(1057.10);
 }
 
 /* Create index if budget allows */

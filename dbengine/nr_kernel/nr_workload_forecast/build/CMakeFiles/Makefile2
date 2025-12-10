@@ -82,12 +82,12 @@ clean: CMakeFiles/test_ext.dir/clean
 CMakeFiles/nr_workload_forecast.dir/all:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/depend
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/build
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles --progress-num=1,2,3,4 "Built target nr_workload_forecast"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --progress-dir=/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles --progress-num=1,2,3,4,5 "Built target nr_workload_forecast"
 .PHONY : CMakeFiles/nr_workload_forecast.dir/all
 
 # Build rule for subdir invocation for target.
 CMakeFiles/nr_workload_forecast.dir/rule: cmake_check_build_system
-	$(CMAKE_COMMAND) -E cmake_progress_start /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles 4
+	$(CMAKE_COMMAND) -E cmake_progress_start /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles 5
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 CMakeFiles/nr_workload_forecast.dir/all
 	$(CMAKE_COMMAND) -E cmake_progress_start /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles 0
 .PHONY : CMakeFiles/nr_workload_forecast.dir/rule

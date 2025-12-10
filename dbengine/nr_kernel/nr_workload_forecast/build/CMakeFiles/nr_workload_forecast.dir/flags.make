@@ -6,5 +6,5 @@ C_DEFINES = -Dnr_workload_forecast_EXPORTS
 
 C_INCLUDES = -I/code/neurdb-dev/psql/include/postgresql/server -I/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/include
 
-C_FLAGS = -O3 -DNDEBUG -fPIC -Wall -Wextra -Wmissing-prototypes -Wpointer-arith -Wendif-labels -Wmissing-format-attribute -Wimplicit-fallthrough -Werror=vla -fstack-protector-strong -fpic -fPIC -std=gnu11
+C_FLAGS = -fPIC -Wall -Wextra -Wmissing-prototypes -Wpointer-arith -Wendif-labels -Wmissing-format-attribute -Wimplicit-fallthrough -Werror=vla -fstack-protector-strong -fpic -fPIC -std=gnu11
 

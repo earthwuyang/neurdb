@@ -4650,6 +4650,17 @@ struct config_string ConfigureNamesString[] =
 		check_debug_io_direct, assign_debug_io_direct, NULL
 	},
 
+	{
+		{"nr_index_management_strategy", PGC_SUSET, CUSTOM_OPTIONS,
+			gettext_noop("Sets the index management strategy for NeurDB."),
+			gettext_noop("\"predictive\" uses workload forecasting and periodic optimization, "
+						 "\"reactive\" provides real-time query-by-query recommendations.")
+		},
+		&nr_index_management_strategy,
+		"predictive",
+		check_nr_index_management_strategy, assign_nr_index_management_strategy, NULL
+	},
+
 	/* End-of-list marker */
 	{
 		{NULL, 0, 0, NULL, NULL}, NULL, NULL, NULL, NULL, NULL

@@ -1,0 +1,173 @@
+#include "postgres.h"
+
+#include "neurdb/guc.h"
+#include "utils/builtins.h"
+#include "libpq/pqformat.h"
+#include "miscadmin.h"
+
+/* Include HTTP client function declaration */
+#include "nr_workload_forecast.h"
+
+/**
+ * Configurable parameters
+ *
+ * Set in `backend/utils/misc/guc_tables.c`
+ */
+char *NrModelName = NULL;
+int NrTaskBatchSize;
+int NrTaskEpoch;
+int NrTaskMaxFeatures;
+int NrTaskNumBatches;
+
+/*
+ * Index management parameters
+ * Default values will be set in guc_tables.c
+ */
+double nr_max_index_storage_mb = 0.0;
+bool nr_enable_auto_index_creation = false;
+int nr_index_management_strategy = 0; /* Default to predictive strategy */
+
+/* Function declarations for GUC hooks */
+static bool check_nr_enable_auto_index_creation(bool *newval, void **extra, GucSource source);
+static void assign_nr_enable_auto_index_creation(bool newval, void *extra);
+static void notify_ai_engine_guc_change(bool enabled);
+static bool check_nr_index_management_strategy(int *newval, void **extra, GucSource source);
+static void assign_nr_index_management_strategy(int newval, void *extra);
+static void notify_ai_engine_strategy_change(int strategy);
+
+/* Function definitions for GUC hooks */
+static bool
+check_nr_enable_auto_index_creation(bool *newval, void **extra, GucSource source)
+{
+    /* Always allow changes */
+    return true;
+}
+
+static void
+assign_nr_enable_auto_index_creation(bool newval, void *extra)
+{
+    /* Store the old value to detect changes */
+    static bool old_value = false;
+
+    if (newval != old_value)
+    {
+        ereport(LOG,
+                (errmsg("nr_enable_auto_index_creation changed from %s to %s",
+                        old_value ? "true" : "false",
+                        newval ? "true" : "false")));
+
+        /* Notify AI engine about the change */
+        notify_ai_engine_guc_change(newval);
+
+        old_value = newval;
+    }
+}
+
+static void
+notify_ai_engine_guc_change(bool enabled)
+{
+    char *url = "http://localhost:8777/guc_change";
+    char *payload;
+    char *response = NULL;
+
+    /* Prepare payload */
+    if (enabled)
+    {
+        payload = psprintf("{\"parameter\": \"nr_enable_auto_index_creation\", "
+                         "\"value\": true, \"action\": \"enable\"}");
+    }
+    else
+    {
+        payload = psprintf("{\"parameter\": \"nr_enable_auto_index_creation\", "
+                         "\"value\": false, \"action\": \"disable\"}");
+    }
+
+    /* Send notification to AI engine */
+    response = send_http_request(url, payload);
+
+    if (response == NULL)
+    {
+        ereport(WARNING,
+                (errmsg("Failed to notify AI engine about GUC change to %s",
+                        enabled ? "enabled" : "disabled")));
+    }
+    else
+    {
+        ereport(LOG,
+                (errmsg("Successfully notified AI engine about GUC change: %s", response)));
+        pfree(response);
+    }
+
+    pfree(payload);
+}
+
+/*
+ * Index Management Strategy GUC hooks
+ */
+static bool
+check_nr_index_management_strategy(int *newval, void **extra, GucSource source)
+{
+    /* Validate that the strategy value is valid (0 = predictive, 1 = reactive) */
+    if (*newval != 0 && *newval != 1)
+    {
+        ereport(ERROR,
+                (errmsg("invalid index management strategy: %d", *newval),
+                 errhint("Valid values are: 0 (predictive) or 1 (reactive)")));
+        return false;
+    }
+
+    return true;
+}
+
+static void
+assign_nr_index_management_strategy(int newval, void *extra)
+{
+    /* Store the old value to detect changes */
+    static int old_value = 0; /* Default to predictive */
+
+    if (newval != old_value)
+    {
+        const char *strategy_names[] = {"predictive", "reactive"};
+
+        ereport(LOG,
+                (errmsg("nr_index_management_strategy changed from %s to %s",
+                        strategy_names[old_value],
+                        strategy_names[newval])));
+
+        /* Notify AI engine about the strategy change */
+        notify_ai_engine_strategy_change(newval);
+
+        old_value = newval;
+    }
+}
+
+static void
+notify_ai_engine_strategy_change(int strategy)
+{
+    char *url = "http://localhost:8777/index/switch_strategy";
+    char *payload;
+    char *response = NULL;
+    const char *strategy_names[] = {"predictive", "reactive"};
+
+    /* Prepare payload */
+    payload = psprintf("{\"strategy\": \"%s\"}", strategy_names[strategy]);
+
+    /* Send notification to AI engine */
+    response = send_http_request(url, payload);
+
+    if (response == NULL)
+    {
+        ereport(WARNING,
+                (errmsg("Failed to notify AI engine about strategy change to %s",
+                        strategy_names[strategy])));
+    }
+    else
+    {
+        ereport(LOG,
+                (errmsg("Successfully notified AI engine about strategy change to %s: %s",
+                        strategy_names[strategy], response)));
+        pfree(response);
+    }
+
+    pfree(payload);
+}

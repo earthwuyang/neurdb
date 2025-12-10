@@ -51,17 +51,32 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Configuration - Updated for macOS direct execution
+# Configuration - Updated for both host and Docker execution
 DB_HOST="${DB_HOST:-localhost}"
 DB_PORT="${DB_PORT:-15432}"
 DB_NAME="${DB_NAME:-imdb_test}"
 DB_USER="${DB_USER:-neurdb}"
 NEURDB_PATH="/Volumes/data/DB/neurdb_dev"
-DRIFTBENCH_PATH="/Volumes/data/DB/DriftBench"
 
-# Create output directory on macOS
+# Check if we're inside Docker container
+if [[ -f "/.dockerenv" ]] || grep -q 'docker' /proc/1/cgroup 2>/dev/null; then
+    DRIFTBENCH_PATH="/code/neurdb-dev"
+    DB_HOST="localhost"
+    DB_PORT="5432"
+    DB_NAME="neurdb"
+    DB_USER="neurdb"
+else
+    DRIFTBENCH_PATH="/Volumes/data/DB/DriftBench"
+fi
+
+# Create output directory (works both inside Docker and on host)
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-BASE_OUTPUT_DIR="${NEURDB_PATH}/output/neurdb_benchmark_${TIMESTAMP}"
+# Check if we're inside Docker container
+if [[ -f "/.dockerenv" ]] || grep -q 'docker' /proc/1/cgroup 2>/dev/null; then
+    BASE_OUTPUT_DIR="/code/neurdb-dev/output/neurdb_benchmark_${TIMESTAMP}"
+else
+    BASE_OUTPUT_DIR="${NEURDB_PATH}/output/neurdb_benchmark_${TIMESTAMP}"
+fi
 mkdir -p "$BASE_OUTPUT_DIR"
 
 # Logging
@@ -85,8 +100,14 @@ get_index_stats() {
     local mode=$1
     local stats_file="${BASE_OUTPUT_DIR}/index_stats_${mode}.json"
 
+    # Set PostgreSQL path based on environment
+    local psql_cmd="psql"
+    if [[ -f "/.dockerenv" ]] || grep -q 'docker' /proc/1/cgroup 2>/dev/null; then
+        psql_cmd="/code/neurdb-dev/psql/bin/psql"
+    fi
+
     # Get index stats using standard PostgreSQL views
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "
+    $psql_cmd -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "
         SELECT json_build_object(
             'total_indexes', (SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public'),
             'total_size_mb', COALESCE(
@@ -107,7 +128,7 @@ get_index_stats() {
     " > "$stats_file"
 
     # Also save readable version
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "
+    $psql_cmd -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "
         SELECT
             COUNT(*) as total_indexes,
             COALESCE(SUM(pg_relation_size(s.indexrelid)) / (1024*1024.0), 0) as total_size_mb
@@ -115,32 +136,110 @@ get_index_stats() {
     " >> "$BASE_OUTPUT_DIR/index_stats_${mode}.txt"
 }
 
-# Function to set GUC parameter
+# Function to set GUC parameter and strategy
 set_guc_parameter() {
     local enabled=$1
+    local strategy=$2
     local value=$([[ "$enabled" == "true" ]] && echo "on" || echo "off")
 
+    # Set PostgreSQL path based on environment
+    local psql_cmd="psql"
+    if [[ -f "/.dockerenv" ]] || grep -q 'docker' /proc/1/cgroup 2>/dev/null; then
+        psql_cmd="/code/neurdb-dev/psql/bin/psql"
+    fi
+
     echo "🔧 Setting nr_enable_auto_index_creation = $value"
+    if [[ -n "$strategy" ]]; then
+        echo "🎯 Setting nr_index_management_strategy = $strategy"
+    fi
 
     # Set GUC parameter at session level
-    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SET nr_enable_auto_index_creation = $value;" >/dev/null
+    $psql_cmd -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SET nr_enable_auto_index_creation = $value;" >/dev/null
 
-    # Verify the setting
-    local current_value=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "SHOW nr_enable_auto_index_creation;")
+    # Set strategy if specified
+    if [[ -n "$strategy" ]]; then
+        $psql_cmd -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SET nr_index_management_strategy = '$strategy';" >/dev/null
+    fi
 
-    echo "✅ GUC parameter set to $value (current: $current_value)"
+    # Verify the settings
+    local current_value=$($psql_cmd -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "SHOW nr_enable_auto_index_creation;")
+    local current_strategy=$($psql_cmd -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "SHOW nr_index_management_strategy;")
+
+    echo "✅ GUC parameters set:"
+    echo "   - nr_enable_auto_index_creation = $value (current: $current_value)"
+    echo "   - nr_index_management_strategy = $current_strategy"
 
     # Check if AI engine is accessible
     if curl -s "http://localhost:8777/health" >/dev/null 2>&1; then
         echo "   ✅ AI Engine is accessible on port 8777"
         if [[ "$enabled" == "true" ]]; then
             echo "   🤖 Auto-index creation is now ENABLED"
+            if [[ "$strategy" == "reactive" ]]; then
+                echo "   ⚡ Using REACTIVE strategy (real-time index management)"
+            elif [[ "$strategy" == "predictive" ]]; then
+                echo "   🔮 Using PREDICTIVE strategy (forecast-based optimization)"
+            fi
         else
             echo "   ⏸️  Auto-index creation is now DISABLED"
         fi
     else
         echo "   ⚠️  AI Engine not accessible on port 8777"
         echo "   Auto-index functionality may not work properly"
+    fi
+}
+
+# Function to monitor index creation/deletion in real-time
+monitor_index_activity() {
+    local mode=$1
+    local duration=$2
+    echo "🔍 Starting index activity monitoring (${duration}s)..."
+
+    # Create monitoring log file
+    local monitor_log="$BASE_OUTPUT_DIR/index_monitor_${mode}.log"
+    echo "Timestamp,Total_Indexes,Auto_Indexes,Total_Size_MB,New_Created,Deleted" > "$monitor_log"
+
+    # Get initial index state
+    local prev_indexes=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public';")
+    local prev_auto=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "SELECT COUNT(*) FROM pg_stat_user_indexes WHERE indexrelname LIKE 'idx_auto_%';")
+
+    # Monitor for specified duration (samples every 10 seconds)
+    local end_time=$(($(date +%s) + duration))
+    while [[ $(date +%s) -lt $end_time ]]; do
+        local current_time=$(date '+%Y-%m-%d %H:%M:%S')
+        local current_indexes=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "SELECT COUNT(*) FROM pg_indexes WHERE schemaname = 'public';")
+        local current_auto=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "SELECT COUNT(*) FROM pg_stat_user_indexes WHERE indexrelname LIKE 'idx_auto_%';")
+        local current_size=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -A -c "SELECT COALESCE(SUM(pg_relation_size(indexrelid)) / (1024*1024.0), 0) FROM pg_stat_user_indexes;")
+
+        local created=$((current_auto - prev_auto))
+        local deleted=$((prev_auto - current_auto))
+        if [[ $deleted -lt 0 ]]; then deleted=0; fi
+
+        echo "$current_time,$current_indexes,$current_auto,$current_size,$created,$deleted" >> "$monitor_log"
+
+        prev_indexes=$current_indexes
+        prev_auto=$current_auto
+
+        sleep 10
+    done
+
+    echo "✅ Index activity monitoring completed. Log saved to: $monitor_log"
+}
+
+# Function to check AI engine index recommendations
+check_ai_engine_activity() {
+    local mode=$1
+    echo "🤖 Checking AI engine activity for $mode mode..."
+
+    local ai_log="$BASE_OUTPUT_DIR/ai_engine_${mode}.log"
+
+    # Check if AI engine provides any API endpoints for monitoring
+    echo "Timestamp,AI_Engine_Response" > "$ai_log"
+
+    # Try to get reactive strategy status or recommendations
+    if curl -s "http://localhost:8777/index/reactive/status" >> "$ai_log" 2>&1; then
+        echo "✅ AI engine reactive status retrieved"
+    else
+        echo "⚠️ Could not retrieve AI engine reactive status" >> "$ai_log"
     fi
 }
 
@@ -212,14 +311,14 @@ run_driftbench_workload() {
     cd "$BASE_OUTPUT_DIR"
 }
 
-# Phase 1: Benchmark with auto-index disabled
+# Phase 1: Benchmark with auto-index disabled (Baseline)
 echo ""
 echo "=========================================="
-echo "PHASE 1: Benchmark WITHOUT Auto-Index"
+echo "PHASE 1: Baseline (WITHOUT Auto-Index)"
 echo "=========================================="
 
 echo "📊 Capturing initial state (auto-index disabled)..."
-get_index_stats "noauto_initial"
+get_index_stats "baseline_initial"
 
 echo "🔧 Disabling automatic index creation..."
 set_guc_parameter false
@@ -228,13 +327,13 @@ set_guc_parameter false
 restart_postgres
 
 echo "📊 Capturing state after disabling auto-index..."
-get_index_stats "noauto_after_disable"
+get_index_stats "baseline_after_disable"
 
-echo "🚀 Running workload (no auto-index, ${BENCHMARK_DURATION}s)..."
-run_driftbench_workload "noauto" "$BENCHMARK_DURATION"
+echo "🚀 Running baseline workload (no auto-index, ${BENCHMARK_DURATION}s)..."
+run_driftbench_workload "baseline" "$BENCHMARK_DURATION"
 
-echo "📊 Capturing final state (no auto-index)..."
-get_index_stats "noauto_final"
+echo "📊 Capturing final state (baseline)..."
+get_index_stats "baseline_final"
 
 echo ""
 echo "✅ Phase 1 completed successfully!"
@@ -245,32 +344,87 @@ echo ""
 echo "⏱️ Waiting 10 seconds between tests..."
 sleep 10
 
-# Phase 2: Benchmark with auto-index enabled
+# Phase 2: Benchmark with REACTIVE strategy
 echo ""
 echo "=========================================="
-echo "PHASE 2: Benchmark WITH Auto-Index"
+echo "PHASE 2: Testing REACTIVE Index Strategy"
 echo "=========================================="
 
-echo "📊 Capturing initial state (auto-index enabled)..."
-get_index_stats "auto_initial"
+echo "📊 Capturing initial state (reactive strategy)..."
+get_index_stats "reactive_initial"
 
-echo "🔧 Enabling automatic index creation..."
-set_guc_parameter true
+echo "🔧 Enabling automatic index creation with REACTIVE strategy..."
+set_guc_parameter true "reactive"
 
 # Restart to apply changes if needed
 restart_postgres
 
-echo "📊 Capturing state after enabling auto-index..."
-get_index_stats "auto_after_enable"
+echo "📊 Capturing state after enabling reactive strategy..."
+get_index_stats "reactive_after_enable"
 
-echo "🚀 Running workload (with auto-index, ${BENCHMARK_DURATION}s)..."
-run_driftbench_workload "auto" "$BENCHMARK_DURATION"
+echo "🔍 Starting background index monitoring..."
+# Start index monitoring in background
+monitor_index_activity "reactive" "$BENCHMARK_DURATION" &
+MONITOR_PID=$!
 
-echo "📊 Capturing final state (with auto-index)..."
-get_index_stats "auto_final"
+echo "🤖 Checking AI engine status..."
+check_ai_engine_activity "reactive"
+
+echo "🚀 Running workload (with REACTIVE strategy, ${BENCHMARK_DURATION}s)..."
+run_driftbench_workload "reactive" "$BENCHMARK_DURATION"
+
+# Wait for monitoring to complete
+wait $MONITOR_PID
+
+echo "📊 Capturing final state (reactive)..."
+get_index_stats "reactive_final"
 
 echo ""
 echo "✅ Phase 2 completed successfully!"
+echo "   Results saved to: ${BASE_OUTPUT_DIR}/"
+
+# Wait a moment between tests
+echo ""
+echo "⏱️ Waiting 10 seconds between tests..."
+sleep 10
+
+# Phase 3: Benchmark with PREDICTIVE strategy (Optional comparison)
+echo ""
+echo "=========================================="
+echo "PHASE 3: Testing PREDICTIVE Index Strategy"
+echo "=========================================="
+
+echo "📊 Capturing initial state (predictive strategy)..."
+get_index_stats "predictive_initial"
+
+echo "🔧 Enabling automatic index creation with PREDICTIVE strategy..."
+set_guc_parameter true "predictive"
+
+# Restart to apply changes if needed
+restart_postgres
+
+echo "📊 Capturing state after enabling predictive strategy..."
+get_index_stats "predictive_after_enable"
+
+echo "🔍 Starting background index monitoring..."
+# Start index monitoring in background
+monitor_index_activity "predictive" "$BENCHMARK_DURATION" &
+MONITOR_PID=$!
+
+echo "🤖 Checking AI engine status..."
+check_ai_engine_activity "predictive"
+
+echo "🚀 Running workload (with PREDICTIVE strategy, ${BENCHMARK_DURATION}s)..."
+run_driftbench_workload "predictive" "$BENCHMARK_DURATION"
+
+# Wait for monitoring to complete
+wait $MONITOR_PID
+
+echo "📊 Capturing final state (predictive)..."
+get_index_stats "predictive_final"
+
+echo ""
+echo "✅ Phase 3 completed successfully!"
 echo "   Results saved to: ${BASE_OUTPUT_DIR}/"
 
 # Generate comparison report
@@ -279,64 +433,169 @@ echo "=========================================="
 echo "GENERATING COMPARISON REPORT"
 echo "=========================================="
 
-# Simple comparison function
+# Enhanced comparison function for three phases
 compare_results() {
-    local noauto_file="$BASE_OUTPUT_DIR/index_stats_noauto_final.txt"
-    local auto_file="$BASE_OUTPUT_DIR/index_stats_auto_final.txt"
+    local baseline_file="$BASE_OUTPUT_DIR/index_stats_baseline_final.txt"
+    local reactive_file="$BASE_OUTPUT_DIR/index_stats_reactive_final.txt"
+    local predictive_file="$BASE_OUTPUT_DIR/index_stats_predictive_final.txt"
 
-    if [[ -f "$noauto_file" && -f "$auto_file" ]]; then
-        local noauto_size=$(grep -o '[0-9]*\.[0-9]*' "$noauto_file" | tail -1)
-        local auto_size=$(grep -o '[0-9]*\.[0-9]*' "$auto_file" | tail -1)
-        local noauto_count=$(grep -o '[0-9]*' "$noauto_file" | head -1)
-        local auto_count=$(grep -o '[0-9]*' "$auto_file" | head -1)
+    echo "📊 THREE-PHASE INDEX COMPARISON:"
+    echo ""
 
-        local index_diff=$((auto_count - noauto_count))
-        local size_diff=$(echo "$auto_size - $noauto_size" | bc -l 2>/dev/null || echo "0")
-        local size_percent=$(echo "scale=2; ($size_diff / $noauto_size) * 100" | bc -l 2>/dev/null || echo "0")
+    # Baseline stats
+    if [[ -f "$baseline_file" ]]; then
+        local baseline_count=$(grep -o '[0-9]*' "$baseline_file" | head -1)
+        local baseline_size=$(grep -o '[0-9]*\.[0-9]*' "$baseline_file" | tail -1)
+        echo "   📈 Baseline (No Auto):   $baseline_count indexes, ${baseline_size} MB"
+    else
+        echo "   ⚠️  Baseline data not available"
+        return 1
+    fi
 
-        echo "📊 INDEX COMPARISON:"
-        echo "   No Auto:   $noauto_count indexes, ${noauto_size} MB"
-        echo "   With Auto: $auto_count indexes, ${auto_size} MB"
-        echo "   Difference: $index_count new indexes, +${size_diff} MB (${size_percent}%)"
+    # Reactive stats
+    if [[ -f "$reactive_file" ]]; then
+        local reactive_count=$(grep -o '[0-9]*' "$reactive_file" | head -1)
+        local reactive_size=$(grep -o '[0-9]*\.[0-9]*' "$reactive_file" | tail -1)
+        echo "   ⚡ Reactive Strategy:    $reactive_count indexes, ${reactive_size} MB"
 
-        if (( $(echo "$index_diff > 0" | bc -l 2>/dev/null) )); then
-            echo "   ✅ Auto-index created $index_diff indexes during workload"
+        local reactive_diff=$((reactive_count - baseline_count))
+        local reactive_size_diff=$(echo "$reactive_size - $baseline_size" | bc -l 2>/dev/null || echo "0")
+
+        if [[ $reactive_diff -gt 0 ]]; then
+            echo "      ✅ Reactive created $reactive_diff new indexes (+${reactive_size_diff} MB)"
         else
-            echo "   ⚠️  No new indexes created (workload may already be optimized)"
+            echo "      ⚠️  Reactive strategy didn't create new indexes"
         fi
     else
-        echo "   ⚠️  Could not find index stats files for comparison"
+        echo "   ⚠️  Reactive data not available"
     fi
+
+    # Predictive stats
+    if [[ -f "$predictive_file" ]]; then
+        local predictive_count=$(grep -o '[0-9]*' "$predictive_file" | head -1)
+        local predictive_size=$(grep -o '[0-9]*\.[0-9]*' "$predictive_file" | tail -1)
+        echo "   🔮 Predictive Strategy: $predictive_count indexes, ${predictive_size} MB"
+
+        local predictive_diff=$((predictive_count - baseline_count))
+        local predictive_size_diff=$(echo "$predictive_size - $baseline_size" | bc -l 2>/dev/null || echo "0")
+
+        if [[ $predictive_diff -gt 0 ]]; then
+            echo "      ✅ Predictive created $predictive_diff new indexes (+${predictive_size_diff} MB)"
+        else
+            echo "      ⚠️  Predictive strategy didn't create new indexes"
+        fi
+    else
+        echo "   ⚠️  Predictive data not available"
+    fi
+
+    echo ""
+    echo "🔍 DETAILED ANALYSIS:"
+
+    # Check monitoring logs for real-time activity
+    if [[ -f "$BASE_OUTPUT_DIR/index_monitor_reactive.log" ]]; then
+        echo ""
+        echo "   ⚡ REACTIVE STRATEGY ACTIVITY:"
+        local reactive_created=$(tail -n +2 "$BASE_OUTPUT_DIR/index_monitor_reactive.log" | awk -F',' '{sum+=$5} END {print sum+0}')
+        echo "      - Total indexes created during workload: $reactive_created"
+
+        # Show peak activity
+        local peak_indexes=$(tail -n +2 "$BASE_OUTPUT_DIR/index_monitor_reactive.log" | awk -F',' '{print $3}' | sort -nr | head -1)
+        echo "      - Peak auto-index count: $peak_indexes"
+    fi
+
+    if [[ -f "$BASE_OUTPUT_DIR/index_monitor_predictive.log" ]]; then
+        echo ""
+        echo "   🔮 PREDICTIVE STRATEGY ACTIVITY:"
+        local predictive_created=$(tail -n +2 "$BASE_OUTPUT_DIR/index_monitor_predictive.log" | awk -F',' '{sum+=$5} END {print sum+0}')
+        echo "      - Total indexes created during workload: $predictive_created"
+
+        # Show peak activity
+        local peak_indexes=$(tail -n +2 "$BASE_OUTPUT_DIR/index_monitor_predictive.log" | awk -F',' '{print $3}' | sort -nr | head -1)
+        echo "      - Peak auto-index count: $peak_indexes"
+    fi
+
+    echo ""
+    echo "💡 INTERPRETATION:"
+    echo "   - Reactive strategy creates/destroys indexes in real-time based on query patterns"
+    echo "   - Predictive strategy optimizes indexes based on workload forecasting"
+    echo "   - Monitor the index_monitor_*.log files for detailed activity timeline"
+}
+
+# Strategy performance comparison
+compare_strategy_performance() {
+    echo ""
+    echo "🏁 STRATEGY PERFORMANCE COMPARISON:"
+
+    # Check if we have AI engine logs
+    if [[ -f "$BASE_OUTPUT_DIR/ai_engine_reactive.log" ]]; then
+        echo ""
+        echo "   ⚡ Reactive AI Engine Activity:"
+        grep -v "Timestamp,AI_Engine_Response" "$BASE_OUTPUT_DIR/ai_engine_reactive.log" | head -5 | sed 's/^/      /'
+    fi
+
+    if [[ -f "$BASE_OUTPUT_DIR/ai_engine_predictive.log" ]]; then
+        echo ""
+        echo "   🔮 Predictive AI Engine Activity:"
+        grep -v "Timestamp,AI_Engine_Response" "$BASE_OUTPUT_DIR/ai_engine_predictive.log" | head -5 | sed 's/^/      /'
+    fi
+
+    echo ""
+    echo "📋 RECOMMENDATIONS:"
+    echo "   - Check index_monitor_*.csv files for real-time index creation/deletion patterns"
+    echo "   - Review driftbench_*.log files for query execution details"
+    echo "   - Compare final index counts to see which strategy was more active"
 }
 
 compare_results
+compare_strategy_performance
 
 # Save final summary
 cat > "$BASE_OUTPUT_DIR/benchmark_summary.txt" << EOF
 ==========================================
-NEURDB BENCHMARK SUMMARY
+NEURDB REACTIVE/PREDICTIVE BENCHMARK SUMMARY
 ==========================================
 Date: $(date)
-Duration: ${BENCHMARK_DURATION}s
+Duration: ${BENCHMARK_DURATION}s per phase
 Output: $BASE_OUTPUT_DIR
 
 Files Created:
-- index_stats_noauto_initial.json/txt
-- index_stats_noauto_after_disable.json/txt
-- index_stats_noauto_final.json/txt
-- index_stats_auto_initial.json/txt
-- index_stats_auto_after_enable.json/txt
-- index_stats_auto_final.json/txt
-- driftbench_noauto.log
-- driftbench_auto.log
+- index_stats_baseline_initial.json/txt
+- index_stats_baseline_after_disable.json/txt
+- index_stats_baseline_final.json/txt
+- index_stats_reactive_initial.json/txt
+- index_stats_reactive_after_enable.json/txt
+- index_stats_reactive_final.json/txt
+- index_stats_predictive_initial.json/txt
+- index_stats_predictive_after_enable.json/txt
+- index_stats_predictive_final.json/txt
+- index_monitor_reactive.log (Real-time monitoring)
+- index_monitor_predictive.log (Real-time monitoring)
+- ai_engine_reactive.log (AI engine activity)
+- ai_engine_predictive.log (AI engine activity)
+- driftbench_baseline.log
+- driftbench_reactive.log
+- driftbench_predictive.log
+
+Test Phases:
+1. BASELINE: No automatic index creation
+2. REACTIVE: Real-time index management with budget constraints
+3. PREDICTIVE: Forecast-based index optimization
 
 Configuration:
-- nr_enable_auto_index_creation: Disabled (Phase 1), Enabled (Phase 2)
-- Database: imdb_ori
+- nr_enable_auto_index_creation: Disabled (Phase 1), Enabled (Phases 2-3)
+- nr_index_management_strategy: reactive (Phase 2), predictive (Phase 3)
+- Database: $DB_NAME
 - Workload: DriftBench IMDb patterns
 
-Note: Results show how NeurDB's automatic index management
-adapts to real workload patterns.
+Key Features Tested:
+- Reactive strategy: Real-time query-by-query index recommendations
+- Predictive strategy: Workload forecasting and periodic optimization
+- Index budget management and eviction policies
+- Dynamic index creation and deletion
+
+Note: Results compare baseline performance against both reactive
+and predictive strategies to demonstrate NeurDB's adaptive
+index management capabilities.
 ==========================================
 EOF
 
@@ -353,6 +612,17 @@ echo "🧹 No temporary files to clean up (using direct DriftBench invocation)"
 echo ""
 echo "💡 To analyze detailed results:"
 echo "   - Check index_stats_*.json files for detailed index data"
+echo "   - Review index_monitor_*.log files for REAL-TIME index activity"
+echo "   - Check ai_engine_*.log files for AI engine responses"
 echo "   - Review driftbench_*.log files for query execution details"
-echo "   - Use the comparison script if you have both test results"
+echo ""
+echo "🔍 Key files for REACTIVE strategy analysis:"
+echo "   - index_monitor_reactive.log: Shows real-time index creation/deletion"
+echo "   - ai_engine_reactive.log: Shows AI engine recommendations"
+echo "   - index_stats_reactive_*.json: Shows before/after index state"
+echo ""
+echo "🔮 Key files for PREDICTIVE strategy analysis:"
+echo "   - index_monitor_predictive.log: Shows real-time index activity"
+echo "   - ai_engine_predictive.log: Shows AI engine forecasting activity"
+echo "   - index_stats_predictive_*.json: Shows optimization results"
 echo ""

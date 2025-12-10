@@ -1832,7 +1832,8 @@ check_index_only(RelOptInfo *rel, IndexOptInfo *index)
 		if (attno == 0)
 			continue;
 
-		if (index->canreturn[i])
+		/* Safety check: canreturn should never be NULL, but guard against it */
+		if (index->canreturn != NULL && index->canreturn[i])
 			index_canreturn_attrs =
 				bms_add_member(index_canreturn_attrs,
 							   attno - FirstLowInvalidHeapAttributeNumber);

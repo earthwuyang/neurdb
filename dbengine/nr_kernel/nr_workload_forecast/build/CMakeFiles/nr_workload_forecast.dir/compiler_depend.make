@@ -34,8 +34,6 @@ CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o: ../src/http_client.c \
   /usr/include/aarch64-linux-gnu/bits/stdio_lim.h \
   /usr/include/aarch64-linux-gnu/bits/floatn.h \
   /usr/include/aarch64-linux-gnu/bits/floatn-common.h \
-  /usr/include/aarch64-linux-gnu/bits/stdio.h \
-  /usr/include/aarch64-linux-gnu/bits/stdio2.h \
   /usr/include/stdlib.h \
   /usr/include/aarch64-linux-gnu/bits/waitflags.h \
   /usr/include/aarch64-linux-gnu/bits/waitstatus.h \
@@ -56,7 +54,6 @@ CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o: ../src/http_client.c \
   /usr/include/aarch64-linux-gnu/bits/types/__sigset_t.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct_timeval.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct_timespec.h \
-  /usr/include/aarch64-linux-gnu/bits/select2.h \
   /usr/include/aarch64-linux-gnu/bits/pthreadtypes.h \
   /usr/include/aarch64-linux-gnu/bits/thread-shared-types.h \
   /usr/include/aarch64-linux-gnu/bits/pthreadtypes-arch.h \
@@ -64,15 +61,11 @@ CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o: ../src/http_client.c \
   /usr/include/aarch64-linux-gnu/bits/struct_mutex.h \
   /usr/include/aarch64-linux-gnu/bits/struct_rwlock.h \
   /usr/include/alloca.h \
-  /usr/include/aarch64-linux-gnu/bits/stdlib-bsearch.h \
   /usr/include/aarch64-linux-gnu/bits/stdlib-float.h \
-  /usr/include/aarch64-linux-gnu/bits/stdlib.h \
   /usr/include/string.h \
   /usr/include/aarch64-linux-gnu/bits/types/locale_t.h \
   /usr/include/aarch64-linux-gnu/bits/types/__locale_t.h \
   /usr/include/strings.h \
-  /usr/include/aarch64-linux-gnu/bits/strings_fortified.h \
-  /usr/include/aarch64-linux-gnu/bits/string_fortified.h \
   /usr/lib/gcc/aarch64-linux-gnu/11/include/stdint.h \
   /usr/include/stdint.h \
   /usr/include/aarch64-linux-gnu/bits/wchar.h \
@@ -92,7 +85,6 @@ CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o: ../src/http_client.c \
   /usr/include/setjmp.h \
   /usr/include/aarch64-linux-gnu/bits/setjmp.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct___jmp_buf_tag.h \
-  /usr/include/aarch64-linux-gnu/bits/setjmp2.h \
   /code/neurdb-dev/psql/include/postgresql/server/lib/stringinfo.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/errcodes.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/palloc.h \
@@ -156,7 +148,6 @@ CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o: ../src/http_client.c \
   /usr/include/aarch64-linux-gnu/bits/fcntl-linux.h \
   /usr/include/aarch64-linux-gnu/bits/stat.h \
   /usr/include/aarch64-linux-gnu/bits/struct_stat.h \
-  /usr/include/aarch64-linux-gnu/bits/fcntl2.h \
   /code/neurdb-dev/psql/include/postgresql/server/access/xlogrecord.h \
   /code/neurdb-dev/psql/include/postgresql/server/access/rmgr.h \
   /code/neurdb-dev/psql/include/postgresql/server/access/rmgrlist.h \
@@ -216,7 +207,6 @@ CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o: ../src/http_client.c \
   /usr/include/aarch64-linux-gnu/asm/sockios.h \
   /usr/include/asm-generic/sockios.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct_osockaddr.h \
-  /usr/include/aarch64-linux-gnu/bits/socket2.h \
   /usr/include/aarch64-linux-gnu/sys/un.h \
   /usr/include/netdb.h \
   /usr/include/netinet/in.h \
@@ -272,8 +262,279 @@ CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o: ../src/http_client.c \
   /usr/include/aarch64-linux-gnu/bits/confname.h \
   /usr/include/aarch64-linux-gnu/bits/getopt_posix.h \
   /usr/include/aarch64-linux-gnu/bits/getopt_core.h \
-  /usr/include/aarch64-linux-gnu/bits/unistd.h \
   /usr/include/aarch64-linux-gnu/bits/unistd_ext.h
+
+CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o: ../src/nr_index_reactive.c \
+  /usr/include/stdc-predef.h \
+  /code/neurdb-dev/psql/include/postgresql/server/postgres.h \
+  /code/neurdb-dev/psql/include/postgresql/server/c.h \
+  /code/neurdb-dev/psql/include/postgresql/server/postgres_ext.h \
+  /code/neurdb-dev/psql/include/postgresql/server/pg_config_ext.h \
+  /code/neurdb-dev/psql/include/postgresql/server/pg_config.h \
+  /code/neurdb-dev/psql/include/postgresql/server/pg_config_manual.h \
+  /code/neurdb-dev/psql/include/postgresql/server/pg_config_os.h \
+  /usr/include/stdio.h \
+  /usr/include/aarch64-linux-gnu/bits/libc-header-start.h \
+  /usr/include/features.h \
+  /usr/include/features-time64.h \
+  /usr/include/aarch64-linux-gnu/bits/wordsize.h \
+  /usr/include/aarch64-linux-gnu/bits/timesize.h \
+  /usr/include/aarch64-linux-gnu/sys/cdefs.h \
+  /usr/include/aarch64-linux-gnu/bits/long-double.h \
+  /usr/include/aarch64-linux-gnu/gnu/stubs.h \
+  /usr/include/aarch64-linux-gnu/gnu/stubs-lp64.h \
+  /usr/lib/gcc/aarch64-linux-gnu/11/include/stddef.h \
+  /usr/lib/gcc/aarch64-linux-gnu/11/include/stdarg.h \
+  /usr/include/aarch64-linux-gnu/bits/types.h \
+  /usr/include/aarch64-linux-gnu/bits/typesizes.h \
+  /usr/include/aarch64-linux-gnu/bits/time64.h \
+  /usr/include/aarch64-linux-gnu/bits/types/__fpos_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/__mbstate_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/__fpos64_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/__FILE.h \
+  /usr/include/aarch64-linux-gnu/bits/types/FILE.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct_FILE.h \
+  /usr/include/aarch64-linux-gnu/bits/stdio_lim.h \
+  /usr/include/aarch64-linux-gnu/bits/floatn.h \
+  /usr/include/aarch64-linux-gnu/bits/floatn-common.h \
+  /usr/include/stdlib.h \
+  /usr/include/aarch64-linux-gnu/bits/waitflags.h \
+  /usr/include/aarch64-linux-gnu/bits/waitstatus.h \
+  /usr/include/aarch64-linux-gnu/sys/types.h \
+  /usr/include/aarch64-linux-gnu/bits/types/clock_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/clockid_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/time_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/timer_t.h \
+  /usr/include/aarch64-linux-gnu/bits/stdint-intn.h \
+  /usr/include/endian.h \
+  /usr/include/aarch64-linux-gnu/bits/endian.h \
+  /usr/include/aarch64-linux-gnu/bits/endianness.h \
+  /usr/include/aarch64-linux-gnu/bits/byteswap.h \
+  /usr/include/aarch64-linux-gnu/bits/uintn-identity.h \
+  /usr/include/aarch64-linux-gnu/sys/select.h \
+  /usr/include/aarch64-linux-gnu/bits/select.h \
+  /usr/include/aarch64-linux-gnu/bits/types/sigset_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/__sigset_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct_timeval.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct_timespec.h \
+  /usr/include/aarch64-linux-gnu/bits/pthreadtypes.h \
+  /usr/include/aarch64-linux-gnu/bits/thread-shared-types.h \
+  /usr/include/aarch64-linux-gnu/bits/pthreadtypes-arch.h \
+  /usr/include/aarch64-linux-gnu/bits/atomic_wide_counter.h \
+  /usr/include/aarch64-linux-gnu/bits/struct_mutex.h \
+  /usr/include/aarch64-linux-gnu/bits/struct_rwlock.h \
+  /usr/include/alloca.h \
+  /usr/include/aarch64-linux-gnu/bits/stdlib-float.h \
+  /usr/include/string.h \
+  /usr/include/aarch64-linux-gnu/bits/types/locale_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/__locale_t.h \
+  /usr/include/strings.h \
+  /usr/lib/gcc/aarch64-linux-gnu/11/include/stdint.h \
+  /usr/include/stdint.h \
+  /usr/include/aarch64-linux-gnu/bits/wchar.h \
+  /usr/include/aarch64-linux-gnu/bits/stdint-uintn.h \
+  /usr/include/errno.h \
+  /usr/include/aarch64-linux-gnu/bits/errno.h \
+  /usr/include/linux/errno.h \
+  /usr/include/aarch64-linux-gnu/asm/errno.h \
+  /usr/include/asm-generic/errno.h \
+  /usr/include/asm-generic/errno-base.h \
+  /usr/include/locale.h \
+  /usr/include/aarch64-linux-gnu/bits/locale.h \
+  /usr/lib/gcc/aarch64-linux-gnu/11/include/stdbool.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port.h \
+  /usr/include/ctype.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/elog.h \
+  /usr/include/setjmp.h \
+  /usr/include/aarch64-linux-gnu/bits/setjmp.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct___jmp_buf_tag.h \
+  /code/neurdb-dev/psql/include/postgresql/server/lib/stringinfo.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/errcodes.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/palloc.h \
+  /code/neurdb-dev/psql/include/postgresql/server/funcapi.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/tupdesc.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/attnum.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_attribute.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/genbki.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_attribute_d.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/pg_list.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/nodes.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/nodetags.h \
+  /code/neurdb-dev/psql/include/postgresql/server/executor/executor.h \
+  /code/neurdb-dev/psql/include/postgresql/server/executor/execdesc.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/execnodes.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/tupconvert.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/attmap.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/tupdesc.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/htup.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/itemptr.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/block.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/off.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/itemid.h \
+  /code/neurdb-dev/psql/include/postgresql/server/executor/tuptable.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/htup_details.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/transam.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/xlogdefs.h \
+  /usr/include/fcntl.h \
+  /usr/include/aarch64-linux-gnu/bits/fcntl.h \
+  /usr/include/aarch64-linux-gnu/bits/fcntl-linux.h \
+  /usr/include/aarch64-linux-gnu/bits/stat.h \
+  /usr/include/aarch64-linux-gnu/bits/struct_stat.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/tupmacs.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_type_d.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/bufpage.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/item.h \
+  /code/neurdb-dev/psql/include/postgresql/server/varatt.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/sysattr.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/buf.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/bitmapset.h \
+  /code/neurdb-dev/psql/include/postgresql/server/executor/instrument.h \
+  /code/neurdb-dev/psql/include/postgresql/server/portability/instr_time.h \
+  /usr/include/time.h \
+  /usr/include/aarch64-linux-gnu/bits/time.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct_tm.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct_itimerspec.h \
+  /code/neurdb-dev/psql/include/postgresql/server/fmgr.h \
+  /code/neurdb-dev/psql/include/postgresql/server/lib/ilist.h \
+  /code/neurdb-dev/psql/include/postgresql/server/lib/pairingheap.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/params.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/plannodes.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/sdir.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/stratnum.h \
+  /code/neurdb-dev/psql/include/postgresql/server/common/relpath.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/catversion.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/lockoptions.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/parsenodes.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/primnodes.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/value.h \
+  /code/neurdb-dev/psql/include/postgresql/server/partitioning/partdefs.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/tidbitmap.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/dsa.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port/atomics.h \
+  /usr/lib/gcc/aarch64-linux-gnu/11/include/limits.h \
+  /usr/lib/gcc/aarch64-linux-gnu/11/include/syslimits.h \
+  /usr/include/limits.h \
+  /usr/include/aarch64-linux-gnu/bits/posix1_lim.h \
+  /usr/include/aarch64-linux-gnu/bits/local_lim.h \
+  /usr/include/linux/limits.h \
+  /usr/include/aarch64-linux-gnu/bits/pthread_stack_min-dynamic.h \
+  /usr/include/aarch64-linux-gnu/bits/pthread_stack_min.h \
+  /usr/include/aarch64-linux-gnu/bits/posix2_lim.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port/atomics/arch-arm.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port/atomics/generic-gcc.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port/atomics/fallback.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port/atomics/generic.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/dsm.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/dsm_impl.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/condition_variable.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/proclist_types.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/spin.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/s_lock.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/hsearch.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/queryenvironment.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/reltrigger.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/sharedtuplestore.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/fd.h \
+  /usr/include/dirent.h \
+  /usr/include/aarch64-linux-gnu/bits/dirent.h \
+  /usr/include/aarch64-linux-gnu/bits/dirent_ext.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/sharedfileset.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/fileset.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/snapshot.h \
+  /code/neurdb-dev/psql/include/postgresql/server/datatype/timestamp.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/sortsupport.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/relcache.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/tuplesort.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/itup.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/logtape.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/tuplestore.h \
+  /code/neurdb-dev/psql/include/postgresql/server/lib/simplehash.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port/pg_bitutils.h \
+  /code/neurdb-dev/psql/include/postgresql/server/tcop/dest.h \
+  /code/neurdb-dev/psql/include/postgresql/server/tcop/cmdtag.h \
+  /code/neurdb-dev/psql/include/postgresql/server/tcop/cmdtaglist.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/memutils.h \
+  /code/neurdb-dev/psql/include/postgresql/server/nodes/memnodes.h \
+  /code/neurdb-dev/psql/include/postgresql/server/executor/tuptable.h \
+  /code/neurdb-dev/psql/include/postgresql/server/fmgr.h \
+  /code/neurdb-dev/psql/include/postgresql/server/miscadmin.h \
+  /usr/include/signal.h \
+  /usr/include/aarch64-linux-gnu/bits/signum-generic.h \
+  /usr/include/aarch64-linux-gnu/bits/signum-arch.h \
+  /usr/include/aarch64-linux-gnu/bits/types/sig_atomic_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/siginfo_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/__sigval_t.h \
+  /usr/include/aarch64-linux-gnu/bits/siginfo-arch.h \
+  /usr/include/aarch64-linux-gnu/bits/siginfo-consts.h \
+  /usr/include/aarch64-linux-gnu/bits/types/sigval_t.h \
+  /usr/include/aarch64-linux-gnu/bits/types/sigevent_t.h \
+  /usr/include/aarch64-linux-gnu/bits/sigevent-consts.h \
+  /usr/include/aarch64-linux-gnu/bits/sigaction.h \
+  /usr/include/aarch64-linux-gnu/bits/sigcontext.h \
+  /usr/include/aarch64-linux-gnu/asm/sigcontext.h \
+  /usr/include/linux/types.h \
+  /usr/include/aarch64-linux-gnu/asm/types.h \
+  /usr/include/asm-generic/types.h \
+  /usr/include/asm-generic/int-ll64.h \
+  /usr/include/aarch64-linux-gnu/asm/bitsperlong.h \
+  /usr/include/asm-generic/bitsperlong.h \
+  /usr/include/linux/posix_types.h \
+  /usr/include/linux/stddef.h \
+  /usr/include/aarch64-linux-gnu/asm/posix_types.h \
+  /usr/include/asm-generic/posix_types.h \
+  /usr/include/aarch64-linux-gnu/asm/sve_context.h \
+  /usr/include/aarch64-linux-gnu/bits/types/stack_t.h \
+  /usr/include/aarch64-linux-gnu/sys/ucontext.h \
+  /usr/include/aarch64-linux-gnu/sys/procfs.h \
+  /usr/include/aarch64-linux-gnu/sys/time.h \
+  /usr/include/aarch64-linux-gnu/sys/user.h \
+  /usr/include/aarch64-linux-gnu/bits/procfs.h \
+  /usr/include/aarch64-linux-gnu/bits/procfs-id.h \
+  /usr/include/aarch64-linux-gnu/bits/procfs-prregset.h \
+  /usr/include/aarch64-linux-gnu/bits/procfs-extra.h \
+  /usr/include/aarch64-linux-gnu/bits/sigstack.h \
+  /usr/include/aarch64-linux-gnu/bits/sigstksz.h \
+  /usr/include/aarch64-linux-gnu/bits/ss_flags.h \
+  /usr/include/aarch64-linux-gnu/bits/types/struct_sigstack.h \
+  /usr/include/aarch64-linux-gnu/bits/sigthread.h \
+  /usr/include/aarch64-linux-gnu/bits/signal_ext.h \
+  /code/neurdb-dev/psql/include/postgresql/server/datatype/timestamp.h \
+  /code/neurdb-dev/psql/include/postgresql/server/pgtime.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_type.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/objectaddress.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/lockdefs.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/builtins.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/fmgrprotos.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/lsyscache.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/array.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/expandeddatum.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/xact.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/xlogreader.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/xlogrecord.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/rmgr.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/rmgrlist.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port/pg_crc32c.h \
+  /code/neurdb-dev/psql/include/postgresql/server/port/pg_bswap.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/relfilelocator.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/backendid.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/sinval.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_class.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_class_d.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_index.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_index_d.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_am.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_am_d.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/syscache.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/timestamp.h \
+  /code/neurdb-dev/psql/include/postgresql/server/pgtime.h \
+  /code/neurdb-dev/psql/include/postgresql/server/utils/rel.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/xlog.h \
+  /code/neurdb-dev/psql/include/postgresql/server/access/xlogbackup.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/catalog.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_publication.h \
+  /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_publication_d.h \
+  /code/neurdb-dev/psql/include/postgresql/server/rewrite/prs2lock.h \
+  /code/neurdb-dev/psql/include/postgresql/server/storage/smgr.h
 
 CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o: ../src/nr_workload_forecast.c \
   /usr/include/stdc-predef.h \
@@ -308,8 +569,6 @@ CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o: ../src/nr_work
   /usr/include/aarch64-linux-gnu/bits/stdio_lim.h \
   /usr/include/aarch64-linux-gnu/bits/floatn.h \
   /usr/include/aarch64-linux-gnu/bits/floatn-common.h \
-  /usr/include/aarch64-linux-gnu/bits/stdio.h \
-  /usr/include/aarch64-linux-gnu/bits/stdio2.h \
   /usr/include/stdlib.h \
   /usr/include/aarch64-linux-gnu/bits/waitflags.h \
   /usr/include/aarch64-linux-gnu/bits/waitstatus.h \
@@ -330,7 +589,6 @@ CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o: ../src/nr_work
   /usr/include/aarch64-linux-gnu/bits/types/__sigset_t.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct_timeval.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct_timespec.h \
-  /usr/include/aarch64-linux-gnu/bits/select2.h \
   /usr/include/aarch64-linux-gnu/bits/pthreadtypes.h \
   /usr/include/aarch64-linux-gnu/bits/thread-shared-types.h \
   /usr/include/aarch64-linux-gnu/bits/pthreadtypes-arch.h \
@@ -338,15 +596,11 @@ CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o: ../src/nr_work
   /usr/include/aarch64-linux-gnu/bits/struct_mutex.h \
   /usr/include/aarch64-linux-gnu/bits/struct_rwlock.h \
   /usr/include/alloca.h \
-  /usr/include/aarch64-linux-gnu/bits/stdlib-bsearch.h \
   /usr/include/aarch64-linux-gnu/bits/stdlib-float.h \
-  /usr/include/aarch64-linux-gnu/bits/stdlib.h \
   /usr/include/string.h \
   /usr/include/aarch64-linux-gnu/bits/types/locale_t.h \
   /usr/include/aarch64-linux-gnu/bits/types/__locale_t.h \
   /usr/include/strings.h \
-  /usr/include/aarch64-linux-gnu/bits/strings_fortified.h \
-  /usr/include/aarch64-linux-gnu/bits/string_fortified.h \
   /usr/lib/gcc/aarch64-linux-gnu/11/include/stdint.h \
   /usr/include/stdint.h \
   /usr/include/aarch64-linux-gnu/bits/wchar.h \
@@ -366,7 +620,6 @@ CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o: ../src/nr_work
   /usr/include/setjmp.h \
   /usr/include/aarch64-linux-gnu/bits/setjmp.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct___jmp_buf_tag.h \
-  /usr/include/aarch64-linux-gnu/bits/setjmp2.h \
   /code/neurdb-dev/psql/include/postgresql/server/lib/stringinfo.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/errcodes.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/palloc.h \
@@ -448,7 +701,6 @@ CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o: ../src/nr_work
   /usr/include/aarch64-linux-gnu/bits/fcntl-linux.h \
   /usr/include/aarch64-linux-gnu/bits/stat.h \
   /usr/include/aarch64-linux-gnu/bits/struct_stat.h \
-  /usr/include/aarch64-linux-gnu/bits/fcntl2.h \
   /code/neurdb-dev/psql/include/postgresql/server/access/tupdesc.h \
   /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_attribute.h \
   /code/neurdb-dev/psql/include/postgresql/server/catalog/genbki.h \
@@ -514,8 +766,6 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
   /usr/include/aarch64-linux-gnu/bits/stdio_lim.h \
   /usr/include/aarch64-linux-gnu/bits/floatn.h \
   /usr/include/aarch64-linux-gnu/bits/floatn-common.h \
-  /usr/include/aarch64-linux-gnu/bits/stdio.h \
-  /usr/include/aarch64-linux-gnu/bits/stdio2.h \
   /usr/include/stdlib.h \
   /usr/include/aarch64-linux-gnu/bits/waitflags.h \
   /usr/include/aarch64-linux-gnu/bits/waitstatus.h \
@@ -536,7 +786,6 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
   /usr/include/aarch64-linux-gnu/bits/types/__sigset_t.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct_timeval.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct_timespec.h \
-  /usr/include/aarch64-linux-gnu/bits/select2.h \
   /usr/include/aarch64-linux-gnu/bits/pthreadtypes.h \
   /usr/include/aarch64-linux-gnu/bits/thread-shared-types.h \
   /usr/include/aarch64-linux-gnu/bits/pthreadtypes-arch.h \
@@ -544,15 +793,11 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
   /usr/include/aarch64-linux-gnu/bits/struct_mutex.h \
   /usr/include/aarch64-linux-gnu/bits/struct_rwlock.h \
   /usr/include/alloca.h \
-  /usr/include/aarch64-linux-gnu/bits/stdlib-bsearch.h \
   /usr/include/aarch64-linux-gnu/bits/stdlib-float.h \
-  /usr/include/aarch64-linux-gnu/bits/stdlib.h \
   /usr/include/string.h \
   /usr/include/aarch64-linux-gnu/bits/types/locale_t.h \
   /usr/include/aarch64-linux-gnu/bits/types/__locale_t.h \
   /usr/include/strings.h \
-  /usr/include/aarch64-linux-gnu/bits/strings_fortified.h \
-  /usr/include/aarch64-linux-gnu/bits/string_fortified.h \
   /usr/lib/gcc/aarch64-linux-gnu/11/include/stdint.h \
   /usr/include/stdint.h \
   /usr/include/aarch64-linux-gnu/bits/wchar.h \
@@ -572,7 +817,6 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
   /usr/include/setjmp.h \
   /usr/include/aarch64-linux-gnu/bits/setjmp.h \
   /usr/include/aarch64-linux-gnu/bits/types/struct___jmp_buf_tag.h \
-  /usr/include/aarch64-linux-gnu/bits/setjmp2.h \
   /code/neurdb-dev/psql/include/postgresql/server/lib/stringinfo.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/errcodes.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/palloc.h \
@@ -642,7 +886,6 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
   /usr/include/aarch64-linux-gnu/bits/fcntl-linux.h \
   /usr/include/aarch64-linux-gnu/bits/stat.h \
   /usr/include/aarch64-linux-gnu/bits/struct_stat.h \
-  /usr/include/aarch64-linux-gnu/bits/fcntl2.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/wait_event.h \
   /code/neurdb-dev/psql/include/postgresql/server/nodes/parsenodes.h \
   /code/neurdb-dev/psql/include/postgresql/server/common/relpath.h \
@@ -662,7 +905,6 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
   /usr/include/aarch64-linux-gnu/bits/confname.h \
   /usr/include/aarch64-linux-gnu/bits/getopt_posix.h \
   /usr/include/aarch64-linux-gnu/bits/getopt_core.h \
-  /usr/include/aarch64-linux-gnu/bits/unistd.h \
   /usr/include/aarch64-linux-gnu/bits/unistd_ext.h \
   /usr/include/time.h \
   /usr/include/aarch64-linux-gnu/bits/time.h \
@@ -719,8 +961,6 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/openssl/configuration.h:
 
-/usr/include/aarch64-linux-gnu/openssl/opensslconf.h:
-
 /usr/include/openssl/md5.h:
 
 /usr/include/aarch64-linux-gnu/sys/stat.h:
@@ -729,45 +969,103 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /code/neurdb-dev/psql/include/postgresql/server/parser/parser.h:
 
-/usr/include/aarch64-linux-gnu/bits/dirent.h:
-
-/usr/include/dirent.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/storage/fd.h:
-
 ../src/query_logger.c:
 
 /code/neurdb-dev/psql/include/postgresql/server/commands/extension.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/parser/parse_node.h:
 
+../src/nr_workload_forecast.c:
+
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_publication_d.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/catalog/catalog.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/access/xlog.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/rel.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/syscache.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_index.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_class.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/sinval.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/lsyscache.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/fmgrprotos.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/builtins.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_type.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/access/itup.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/sortsupport.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/snapshot.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/fileset.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/sharedfileset.h:
+
+/usr/include/aarch64-linux-gnu/bits/dirent.h:
+
+/usr/include/dirent.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/fd.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/sharedtuplestore.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/reltrigger.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/s_lock.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/spin.h:
+
+/usr/include/aarch64-linux-gnu/openssl/opensslconf.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/dsm.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/nodes/tidbitmap.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/executor/instrument.h:
+
 /code/neurdb-dev/psql/include/postgresql/server/optimizer/planner.h:
 
-../src/nr_workload_forecast.c:
+/code/neurdb-dev/psql/include/postgresql/server/access/attmap.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/access/tupconvert.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/executor/execdesc.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/executor/executor.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/funcapi.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/dsm_impl.h:
+
+../src/nr_index_reactive.c:
+
+/code/neurdb-dev/psql/include/postgresql/server/port/pg_bitutils.h:
 
 /usr/include/aarch64-linux-gnu/bits/unistd_ext.h:
 
-/usr/include/aarch64-linux-gnu/bits/unistd.h:
+/usr/include/aarch64-linux-gnu/bits/types/struct_sigstack.h:
 
-/usr/include/aarch64-linux-gnu/bits/getopt_core.h:
+/usr/include/aarch64-linux-gnu/bits/sigstksz.h:
 
-/usr/include/aarch64-linux-gnu/bits/getopt_posix.h:
+/usr/include/features-time64.h:
 
-/usr/include/aarch64-linux-gnu/bits/confname.h:
+/code/neurdb-dev/psql/include/postgresql/server/storage/lockdefs.h:
 
-/usr/include/aarch64-linux-gnu/bits/environments.h:
+/code/neurdb-dev/psql/include/postgresql/server/port/atomics/generic.h:
 
-/usr/include/aarch64-linux-gnu/bits/posix_opt.h:
+/usr/include/aarch64-linux-gnu/bits/ss_flags.h:
 
-/usr/include/unistd.h:
-
-/usr/include/aarch64-linux-gnu/sys/wait.h:
-
-/usr/include/openssl/macros.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/utils/expandeddatum.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/utils/array.h:
+/usr/include/aarch64-linux-gnu/bits/procfs-prregset.h:
 
 /usr/include/aarch64-linux-gnu/bits/socket.h:
 
@@ -777,31 +1075,43 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/stdc-predef.h:
 
+/usr/include/aarch64-linux-gnu/bits/procfs-id.h:
+
 /usr/include/linux/posix_types.h:
 
 /usr/include/aarch64-linux-gnu/bits/sigaction.h:
 
 ../src/http_client.c:
 
+/code/neurdb-dev/psql/include/postgresql/server/storage/condition_variable.h:
+
 /usr/include/aarch64-linux-gnu/bits/types/__sigval_t.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/lib/simplehash.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/sig_atomic_t.h:
 
-/usr/include/aarch64-linux-gnu/bits/setjmp2.h:
-
-/usr/include/aarch64-linux-gnu/sys/user.h:
-
-/usr/include/aarch64-linux-gnu/bits/types/siginfo_t.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/utils/relcache.h:
+/usr/include/aarch64-linux-gnu/bits/types/struct_timeval.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/struct_osockaddr.h:
+
+/usr/include/unistd.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/nodes/execnodes.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/fmgr.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/elog.h:
 
 /usr/include/ctype.h:
 
 /usr/include/aarch64-linux-gnu/bits/endianness.h:
 
 /usr/include/aarch64-linux-gnu/bits/local_lim.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/port.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/timestamp.h:
 
 /usr/lib/gcc/aarch64-linux-gnu/11/include/stdbool.h:
 
@@ -823,21 +1133,11 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /code/neurdb-dev/psql/include/postgresql/server/executor/tuptable.h:
 
-/usr/include/aarch64-linux-gnu/bits/types/struct_sigstack.h:
-
 /code/neurdb-dev/psql/include/postgresql/server/port/atomics/fallback.h:
 
 /usr/include/time.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/storage/bufpage.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/port.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/utils/timestamp.h:
-
-/usr/include/aarch64-linux-gnu/bits/pthreadtypes.h:
-
-/usr/lib/gcc/aarch64-linux-gnu/11/include/limits.h:
 
 /usr/include/signal.h:
 
@@ -847,20 +1147,6 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /code/neurdb-dev/psql/include/postgresql/server/access/xlogreader.h:
 
-/code/neurdb-dev/psql/include/postgresql/server/utils/elog.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/fmgr.h:
-
-/usr/include/aarch64-linux-gnu/bits/types/struct_timeval.h:
-
-/usr/include/aarch64-linux-gnu/bits/stdlib.h:
-
-/usr/include/aarch64-linux-gnu/bits/sigevent-consts.h:
-
-/usr/include/aarch64-linux-gnu/sys/select.h:
-
-/usr/include/aarch64-linux-gnu/gnu/stubs-lp64.h:
-
 /usr/include/aarch64-linux-gnu/bits/stdint-uintn.h:
 
 /usr/include/aarch64-linux-gnu/asm/types.h:
@@ -869,21 +1155,11 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /code/neurdb-dev/psql/include/postgresql/server/access/tupmacs.h:
 
-/code/neurdb-dev/psql/include/postgresql/server/utils/queryenvironment.h:
-
-/usr/include/alloca.h:
-
 /usr/include/aarch64-linux-gnu/bits/time64.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/port/atomics/arch-arm.h:
 
-/usr/include/aarch64-linux-gnu/bits/types.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/port/pg_crc32c.h:
-
-/usr/include/locale.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/lib/ilist.h:
+/code/neurdb-dev/psql/include/postgresql/server/utils/dsa.h:
 
 /usr/include/aarch64-linux-gnu/bits/signum-arch.h:
 
@@ -893,11 +1169,15 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/bits/stdlib-float.h:
 
-/usr/include/aarch64-linux-gnu/bits/select2.h:
-
 /usr/include/aarch64-linux-gnu/bits/time.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/__fpos_t.h:
+
+/usr/include/aarch64-linux-gnu/bits/struct_mutex.h:
+
+/usr/include/aarch64-linux-gnu/bits/types.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/port/pg_crc32c.h:
 
 /usr/include/stdio.h:
 
@@ -906,6 +1186,12 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 /usr/include/aarch64-linux-gnu/bits/types/timer_t.h:
 
 /usr/include/asm-generic/int-ll64.h:
+
+/usr/include/aarch64-linux-gnu/sys/user.h:
+
+/usr/include/aarch64-linux-gnu/bits/types/siginfo_t.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/relcache.h:
 
 /usr/include/aarch64-linux-gnu/sys/ucontext.h:
 
@@ -922,6 +1208,8 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 /usr/include/aarch64-linux-gnu/bits/dirent_ext.h:
 
 /usr/include/aarch64-linux-gnu/bits/siginfo-arch.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/array.h:
 
 /usr/include/aarch64-linux-gnu/bits/typesizes.h:
 
@@ -943,17 +1231,13 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/bits/pthreadtypes-arch.h:
 
+/code/neurdb-dev/psql/include/postgresql/server/storage/smgr.h:
+
 /usr/include/aarch64-linux-gnu/bits/types/FILE.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/c.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/pg_config_ext.h:
-
-/usr/include/features-time64.h:
-
-/usr/include/aarch64-linux-gnu/bits/sigstksz.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/storage/lockdefs.h:
 
 /usr/include/aarch64-linux-gnu/bits/setjmp.h:
 
@@ -965,11 +1249,19 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/bits/types/struct___jmp_buf_tag.h:
 
-/usr/include/aarch64-linux-gnu/bits/stdlib-bsearch.h:
+/code/neurdb-dev/psql/include/postgresql/server/access/xact.h:
+
+/usr/include/aarch64-linux-gnu/bits/sigevent-consts.h:
+
+/usr/include/aarch64-linux-gnu/sys/select.h:
+
+/usr/include/aarch64-linux-gnu/gnu/stubs-lp64.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/struct_timespec.h:
 
 /usr/include/netdb.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/tuplestore.h:
 
 /usr/include/netinet/in.h:
 
@@ -982,6 +1274,8 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 /usr/include/aarch64-linux-gnu/bits/floatn.h:
 
 /usr/include/aarch64-linux-gnu/bits/fcntl.h:
+
+/usr/include/aarch64-linux-gnu/bits/posix_opt.h:
 
 /usr/include/aarch64-linux-gnu/gnu/stubs.h:
 
@@ -996,6 +1290,10 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 /usr/include/aarch64-linux-gnu/asm/socket.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/tcop/cmdtaglist.h:
+
+/usr/include/endian.h:
+
+/usr/include/stdint.h:
 
 /usr/include/aarch64-linux-gnu/bits/siginfo-consts.h:
 
@@ -1017,35 +1315,33 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/bits/locale.h:
 
-/usr/include/aarch64-linux-gnu/bits/string_fortified.h:
-
 /usr/lib/gcc/aarch64-linux-gnu/11/include/stdarg.h:
 
-/usr/include/aarch64-linux-gnu/bits/stdio.h:
-
-/usr/include/aarch64-linux-gnu/bits/signum-generic.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/lib/stringinfo.h:
-
-/usr/include/aarch64-linux-gnu/bits/types/clockid_t.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/storage/proclist_types.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/utils/guc.h:
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_am.h:
 
 /usr/include/stdlib.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/sigevent_t.h:
 
+/code/neurdb-dev/psql/include/postgresql/server/rewrite/prs2lock.h:
+
 /code/neurdb-dev/psql/include/postgresql/server/utils/palloc.h:
 
 /usr/include/aarch64-linux-gnu/bits/struct_rwlock.h:
+
+/usr/lib/gcc/aarch64-linux-gnu/11/include/stddef.h:
+
+/usr/include/aarch64-linux-gnu/bits/sigstack.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/wait_event.h:
 
 /usr/include/aarch64-linux-gnu/bits/pthread_stack_min-dynamic.h:
 
 /usr/include/aarch64-linux-gnu/bits/socket_type.h:
 
 /usr/include/aarch64-linux-gnu/bits/waitstatus.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/tuplesort.h:
 
 /usr/include/aarch64-linux-gnu/asm/bitsperlong.h:
 
@@ -1071,35 +1367,39 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/bits/types/clock_t.h:
 
+/usr/include/aarch64-linux-gnu/bits/getopt_posix.h:
+
 /usr/include/aarch64-linux-gnu/bits/types/sigset_t.h:
 
+/usr/include/aarch64-linux-gnu/bits/signum-generic.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/lib/stringinfo.h:
+
+/usr/include/aarch64-linux-gnu/bits/types/clockid_t.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_index_d.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/storage/proclist_types.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/guc.h:
+
 /usr/include/aarch64-linux-gnu/bits/types/time_t.h:
-
-/usr/include/stdint.h:
-
-/usr/include/endian.h:
-
-/usr/include/aarch64-linux-gnu/bits/atomic_wide_counter.h:
-
-/usr/include/aarch64-linux-gnu/bits/procfs-extra.h:
-
-/code/neurdb-dev/psql/include/postgresql/server/port/atomics/generic.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/utils/errcodes.h:
 
 /usr/include/aarch64-linux-gnu/sys/cdefs.h:
 
-/usr/include/aarch64-linux-gnu/bits/procfs-id.h:
+/usr/include/aarch64-linux-gnu/bits/pthreadtypes.h:
 
-/usr/include/aarch64-linux-gnu/bits/procfs-prregset.h:
+/usr/lib/gcc/aarch64-linux-gnu/11/include/limits.h:
 
-/usr/lib/gcc/aarch64-linux-gnu/11/include/stddef.h:
+/usr/include/locale.h:
 
-/code/neurdb-dev/psql/include/postgresql/server/utils/wait_event.h:
+/usr/include/aarch64-linux-gnu/bits/procfs-extra.h:
 
-/usr/include/aarch64-linux-gnu/bits/sigstack.h:
+/usr/include/aarch64-linux-gnu/bits/atomic_wide_counter.h:
 
-/usr/include/aarch64-linux-gnu/bits/ss_flags.h:
+/code/neurdb-dev/psql/include/postgresql/server/lib/ilist.h:
 
 /usr/include/aarch64-linux-gnu/bits/sigthread.h:
 
@@ -1109,11 +1409,7 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/bits/signal_ext.h:
 
-/usr/include/aarch64-linux-gnu/bits/fcntl2.h:
-
 /code/neurdb-dev/psql/include/postgresql/server/utils/memutils.h:
-
-/usr/include/aarch64-linux-gnu/bits/strings_fortified.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/storage/buf.h:
 
@@ -1131,6 +1427,8 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/bits/struct_stat.h:
 
+/usr/include/aarch64-linux-gnu/sys/wait.h:
+
 /code/neurdb-dev/psql/include/postgresql/server/access/transam.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/catalog/objectaddress.h:
@@ -1143,7 +1441,11 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/fcntl.h:
 
+/code/neurdb-dev/psql/include/postgresql/server/utils/logtape.h:
+
 /usr/include/aarch64-linux-gnu/bits/types/struct_tm.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/lib/pairingheap.h:
 
 /usr/include/aarch64-linux-gnu/bits/stat.h:
 
@@ -1193,9 +1495,11 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /usr/include/aarch64-linux-gnu/bits/posix2_lim.h:
 
+/code/neurdb-dev/psql/include/postgresql/server/access/xlogbackup.h:
+
 /code/neurdb-dev/psql/include/postgresql/server/port/atomics/generic-gcc.h:
 
-/usr/include/aarch64-linux-gnu/bits/stdio2.h:
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_publication.h:
 
 /usr/include/aarch64-linux-gnu/bits/types/struct_iovec.h:
 
@@ -1210,6 +1514,8 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 /usr/include/aarch64-linux-gnu/bits/fcntl-linux.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/pgstat.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_class_d.h:
 
 /usr/include/aarch64-linux-gnu/sys/un.h:
 
@@ -1230,10 +1536,6 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 /usr/include/aarch64-linux-gnu/asm/sockios.h:
 
 /usr/include/asm-generic/sockios.h:
-
-/usr/include/aarch64-linux-gnu/bits/struct_mutex.h:
-
-/usr/include/aarch64-linux-gnu/bits/socket2.h:
 
 /usr/include/rpc/netdb.h:
 
@@ -1267,6 +1569,8 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /code/neurdb-dev/psql/include/postgresql/server/nodes/lockoptions.h:
 
+/code/neurdb-dev/psql/include/postgresql/server/catalog/pg_am_d.h:
+
 /code/neurdb-dev/psql/include/postgresql/server/nodes/primnodes.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/storage/procsignal.h:
@@ -1291,6 +1595,20 @@ CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c 
 
 /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_type_d.h:
 
+/usr/include/aarch64-linux-gnu/bits/environments.h:
+
 /code/neurdb-dev/psql/include/postgresql/server/storage/item.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/access/sysattr.h:
+
+/usr/include/openssl/macros.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/expandeddatum.h:
+
+/usr/include/alloca.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/utils/queryenvironment.h:
+
+/usr/include/aarch64-linux-gnu/bits/confname.h:
+
+/usr/include/aarch64-linux-gnu/bits/getopt_core.h:

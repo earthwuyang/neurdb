@@ -211,6 +211,30 @@ src/http_client.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/src/http_client.c.s
 .PHONY : src/http_client.c.s
 
+src/nr_index_reactive.o: src/nr_index_reactive.c.o
+.PHONY : src/nr_index_reactive.o
+
+# target to build an object file
+src/nr_index_reactive.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o
+.PHONY : src/nr_index_reactive.c.o
+
+src/nr_index_reactive.i: src/nr_index_reactive.c.i
+.PHONY : src/nr_index_reactive.i
+
+# target to preprocess a source file
+src/nr_index_reactive.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.i
+.PHONY : src/nr_index_reactive.c.i
+
+src/nr_index_reactive.s: src/nr_index_reactive.c.s
+.PHONY : src/nr_index_reactive.s
+
+# target to generate assembly for a file
+src/nr_index_reactive.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.s
+.PHONY : src/nr_index_reactive.c.s
+
 src/nr_workload_forecast.o: src/nr_workload_forecast.c.o
 .PHONY : src/nr_workload_forecast.o
 
@@ -276,6 +300,9 @@ help:
 	@echo "... src/http_client.o"
 	@echo "... src/http_client.i"
 	@echo "... src/http_client.s"
+	@echo "... src/nr_index_reactive.o"
+	@echo "... src/nr_index_reactive.i"
+	@echo "... src/nr_index_reactive.s"
 	@echo "... src/nr_workload_forecast.o"
 	@echo "... src/nr_workload_forecast.i"
 	@echo "... src/nr_workload_forecast.s"
