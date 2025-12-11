@@ -283,6 +283,30 @@ src/query_logger.c.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.s
 .PHONY : src/query_logger.c.s
 
+src/query_rewrite.o: src/query_rewrite.c.o
+.PHONY : src/query_rewrite.o
+
+# target to build an object file
+src/query_rewrite.c.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o
+.PHONY : src/query_rewrite.c.o
+
+src/query_rewrite.i: src/query_rewrite.c.i
+.PHONY : src/query_rewrite.i
+
+# target to preprocess a source file
+src/query_rewrite.c.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.i
+.PHONY : src/query_rewrite.c.i
+
+src/query_rewrite.s: src/query_rewrite.c.s
+.PHONY : src/query_rewrite.s
+
+# target to generate assembly for a file
+src/query_rewrite.c.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/nr_workload_forecast.dir/build.make CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.s
+.PHONY : src/query_rewrite.c.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -309,6 +333,9 @@ help:
 	@echo "... src/query_logger.o"
 	@echo "... src/query_logger.i"
 	@echo "... src/query_logger.s"
+	@echo "... src/query_rewrite.o"
+	@echo "... src/query_rewrite.i"
+	@echo "... src/query_rewrite.s"
 .PHONY : help
 
 

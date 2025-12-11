@@ -21,8 +21,6 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 
-PG_MODULE_MAGIC;
-
 /*
  * Query rewrite context for tracking table information
  */
@@ -32,6 +30,12 @@ typedef struct QueryRewriteContext
     List       *table_aliases;  /* List of table aliases and their actual names */
     const char *current_query;  /* Original query string */
 } QueryRewriteContext;
+
+/* Forward declarations */
+static char *simple_replace(char *str, const char *old, const char *new);
+static char *rewrite_query_with_table_prefixes(const char *original_query);
+static void extract_table_info(SelectStmt *select_stmt, QueryRewriteContext *context);
+static char *apply_simple_rewrites(const char *original_query, QueryRewriteContext *context);
 
 /*
  * Rewrite a query to fully qualify column names
@@ -63,7 +67,7 @@ nr_rewrite_query_columns(PG_FUNCTION_ARGS)
 /*
  * Main query rewriting function
  */
-static char *
+char *
 rewrite_query_with_table_prefixes(const char *original_query)
 {
     List       *raw_parsetree_list;
@@ -72,7 +76,7 @@ rewrite_query_with_table_prefixes(const char *original_query)
     char       *rewritten_query = (char *) original_query;
 
     /* Parse the query */
-    raw_parsetree_list = raw_parser(original_query);
+    raw_parsetree_list = raw_parser(original_query, RAW_PARSE_DEFAULT);
 
     /* Process each statement */
     foreach(lc, raw_parsetree_list)
@@ -234,7 +238,7 @@ simple_replace(char *str, const char *old, const char *new)
         /* Only replace if it looks like a standalone column reference */
         if ((q == str || isspace((unsigned char) q[-1]) || q[-1] == '(') &&
             (q[old_len] == '\0' || isspace((unsigned char) q[old_len]) ||
-             q[old_len] == ',' || q[old_len] ')' || q[old_len] == '>' ||
+             q[old_len] == ',' || q[old_len] == ')' || q[old_len] == '>' ||
              q[old_len] == '<' || q[old_len] == '='))
         {
             count++;

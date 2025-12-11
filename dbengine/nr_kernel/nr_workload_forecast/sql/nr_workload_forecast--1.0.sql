@@ -102,9 +102,9 @@ LANGUAGE C VOLATILE STRICT;
 -- Function: Evict least useful index to free up space
 CREATE OR REPLACE FUNCTION nr_evict_least_useful_index(
     required_space_mb float,
-    OUT evicted_index_name text
+    OUT evicted_index_name text,
+    OUT eviction_successful boolean
 )
-RETURNS boolean
 AS 'MODULE_PATHNAME', 'nr_evict_least_useful_index'
 LANGUAGE C VOLATILE STRICT;
 
@@ -248,24 +248,9 @@ $$ LANGUAGE plpgsql;
 
 -- Function to automatically rewrite and send query to AI engine
 CREATE OR REPLACE FUNCTION nr_send_reactive_query_to_ai(query_text TEXT)
-RETURNS TEXT AS $$
-DECLARE
-    rewritten_query TEXT;
-    ai_response TEXT;
-    ai_url TEXT := 'http://localhost:8777/index/reactive/test';
-BEGIN
-    -- Rewrite query to qualify column names
-    rewritten_query := nr_rewrite_query_columns(query_text);
-
-    -- Log the query rewriting
-    RAISE LOG 'NeurDB: Rewritten query from "%" to "%" for AI engine analysis',
-                query_text, rewritten_query;
-
-    -- For now, just return the rewritten query
-    -- In a full implementation, this would send to the AI engine
-    RETURN rewritten_query;
-END;
-$$ LANGUAGE plpgsql;
+RETURNS TEXT
+AS 'MODULE_PATHNAME', 'nr_send_reactive_query_to_ai'
+LANGUAGE C VOLATILE;
 
 -- Grant execute permissions to public for convenience
 GRANT EXECUTE ON FUNCTION nr_get_index_benefit(text, text) TO public;
@@ -273,7 +258,7 @@ GRANT EXECUTE ON FUNCTION nr_rewrite_query_columns(text) TO public;
 GRANT EXECUTE ON FUNCTION nr_test_query_rewrite(text) TO public;
 GRANT EXECUTE ON FUNCTION test_query_rewrite_simple(text) TO public;
 GRANT EXECUTE ON FUNCTION nr_send_reactive_query_to_ai(text) TO public;
-GRANT EXECUTE ON FUNCTION nr_evict_least_useful_index(float, OUT text) TO public;
+GRANT EXECUTE ON FUNCTION nr_evict_least_useful_index(float) TO public;
 GRANT EXECUTE ON FUNCTION nr_get_query_index_requirements(text) TO public;
 GRANT EXECUTE ON FUNCTION nr_calculate_index_creation_cost(text[], text) TO public;
 GRANT EXECUTE ON FUNCTION nr_get_index_usage_statistics() TO public;
@@ -282,7 +267,7 @@ GRANT EXECUTE ON FUNCTION nr_get_reactive_strategy_status() TO public;
 
 -- Grant select on config view and recommendations
 GRANT SELECT ON nr_reactive_config TO public;
-GRANT SELECT ON nr_get_reactive_recommendations() TO public;
+GRANT EXECUTE ON FUNCTION nr_get_reactive_recommendations() TO public;
 
 -- Index Management Strategy Functions
 

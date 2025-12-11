@@ -116,14 +116,6 @@ nr_calculate_index_budget_mb(PG_FUNCTION_ARGS)
         }
     }
 
-    /* Fallback: try the global variable if GUC API fails */
-    if (nr_max_index_storage_mb > 0.0)
-    {
-        budget_mb = nr_max_index_storage_mb;
-        elog(DEBUG1, "Using global nr_max_index_storage_mb = %.2f MB", budget_mb);
-        PG_RETURN_FLOAT8(budget_mb);
-    }
-
     /* If GUC is 0 or not set, calculate as half of database size */
     if (SPI_connect() != SPI_OK_CONNECT)
         elog(ERROR, "SPI_connect failed");
@@ -200,20 +192,13 @@ nr_create_index_if_budget_allows(PG_FUNCTION_ARGS)
             current_usage = DatumGetFloat8(usage_datum);
     }
 
-    /* Calculate budget */
-    if (nr_max_index_storage_mb > 0.0)
+    /* Get budget using nr_calculate_index_budget_mb */
+    if (SPI_execute("SELECT nr_calculate_index_budget_mb()", true, 1) == SPI_OK_SELECT && SPI_processed > 0)
     {
-        budget = nr_max_index_storage_mb;
-    }
-    else
-    {
-        if (SPI_execute("SELECT nr_calculate_index_budget_mb()", true, 1) == SPI_OK_SELECT && SPI_processed > 0)
-        {
-            bool isnull;
-            Datum budget_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
-            if (!isnull)
-                budget = DatumGetFloat8(budget_datum);
-        }
+        bool isnull;
+        Datum budget_datum = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+        if (!isnull)
+            budget = DatumGetFloat8(budget_datum);
     }
 
     SPI_finish();
@@ -223,6 +208,10 @@ nr_create_index_if_budget_allows(PG_FUNCTION_ARGS)
     {
         elog(INFO, "Index storage budget exceeded: current %.2f MB, budget %.2f MB", current_usage, budget);
         PG_RETURN_BOOL(false);
+    }
+    else
+    {
+        elog(INFO, "Index storage budget does not exceed: current %.2f MB, budget %.2f MB", current_usage, budget);
     }
 
     /* Create index (estimate size first) */

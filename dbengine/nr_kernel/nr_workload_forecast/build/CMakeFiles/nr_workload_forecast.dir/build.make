@@ -111,10 +111,24 @@ CMakeFiles/nr_workload_forecast.dir/src/http_client.c.s: cmake_force
 	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling C source to assembly CMakeFiles/nr_workload_forecast.dir/src/http_client.c.s"
 	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/http_client.c -o CMakeFiles/nr_workload_forecast.dir/src/http_client.c.s
 
+CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o: CMakeFiles/nr_workload_forecast.dir/flags.make
+CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o: ../src/query_rewrite.c
+CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o: CMakeFiles/nr_workload_forecast.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building C object CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o -MF CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o.d -o CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o -c /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/query_rewrite.c
+
+CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Preprocessing C source to CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.i"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -E /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/query_rewrite.c > CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.i
+
+CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green "Compiling C source to assembly CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.s"
+	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -S /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/query_rewrite.c -o CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.s
+
 CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o: CMakeFiles/nr_workload_forecast.dir/flags.make
 CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o: ../src/nr_index_reactive.c
 CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o: CMakeFiles/nr_workload_forecast.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Building C object CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --progress-dir=/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Building C object CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o"
 	/usr/bin/cc $(C_DEFINES) $(C_INCLUDES) $(C_FLAGS) -MD -MT CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o -MF CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o.d -o CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o -c /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/nr_index_reactive.c
 
 CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.i: cmake_force
@@ -130,6 +144,7 @@ nr_workload_forecast_OBJECTS = \
 "CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o" \
 "CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o" \
 "CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o" \
+"CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o" \
 "CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o"
 
 # External object files for target nr_workload_forecast
@@ -138,13 +153,14 @@ nr_workload_forecast_EXTERNAL_OBJECTS =
 nr_workload_forecast.so: CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o
 nr_workload_forecast.so: CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o
 nr_workload_forecast.so: CMakeFiles/nr_workload_forecast.dir/src/http_client.c.o
+nr_workload_forecast.so: CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o
 nr_workload_forecast.so: CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o
 nr_workload_forecast.so: CMakeFiles/nr_workload_forecast.dir/build.make
 nr_workload_forecast.so: /usr/lib/aarch64-linux-gnu/libpq.so
 nr_workload_forecast.so: /usr/lib/aarch64-linux-gnu/libssl.so
 nr_workload_forecast.so: /usr/lib/aarch64-linux-gnu/libcrypto.so
 nr_workload_forecast.so: CMakeFiles/nr_workload_forecast.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_5) "Linking C shared module nr_workload_forecast.so"
+	@$(CMAKE_COMMAND) -E cmake_echo_color --switch=$(COLOR) --green --bold --progress-dir=/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/build/CMakeFiles --progress-num=$(CMAKE_PROGRESS_6) "Linking C shared module nr_workload_forecast.so"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/nr_workload_forecast.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

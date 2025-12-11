@@ -12,6 +12,7 @@ set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/nr_index_reactive.c" "CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o" "gcc" "CMakeFiles/nr_workload_forecast.dir/src/nr_index_reactive.c.o.d"
   "/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/nr_workload_forecast.c" "CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o" "gcc" "CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o.d"
   "/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/query_logger.c" "CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o" "gcc" "CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o.d"
+  "/code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/query_rewrite.c" "CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o" "gcc" "CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o.d"
   )
 
 # Targets to which this target links.

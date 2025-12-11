@@ -1696,6 +1696,21 @@ def auto_create_indexes():
         if not data:
             return jsonify({'error': 'Invalid JSON'}), 400
 
+        # Strategy selection: predictive (search optimal set) vs reactive (per-query, no search)
+        # Default to reactive to avoid long searches unless explicitly requested
+        strategy = str(data.get('strategy', 'reactive')).lower()
+
+        def _json_safe(obj):
+            """Convert Enums and nested structures into JSON-serializable types."""
+            from enum import Enum as PyEnum
+            if isinstance(obj, PyEnum):
+                return obj.value
+            if isinstance(obj, list):
+                return [_json_safe(x) for x in obj]
+            if isinstance(obj, dict):
+                return {k: _json_safe(v) for k, v in obj.items()}
+            return obj
+
         # Database connection parameters
         db_params = {
             'host': data.get('database_host', 'localhost'),
@@ -1704,6 +1719,48 @@ def auto_create_indexes():
             'user': data.get('database_user', 'neurdb'),
             'password': data.get('database_password', 'postgres')
         }
+
+        # Reactive path: process each query individually using the reactive manager (no configuration search)
+        if strategy == 'reactive':
+            workload_queries = data.get('workload_queries', [])
+            if not workload_queries:
+                return jsonify({'error': 'No workload queries provided for reactive auto_create'}), 400
+            logger.debug(f"data.get('max_analysis_time_seconds'): {data.get('max_analysis_time_seconds', 5)}")
+
+            config = ReactiveConfig(
+                storage_budget_mb=data.get('storage_budget_mb', 1000.0),
+                min_benefit_threshold=data.get('min_benefit_threshold', 0.1),
+                eviction_policy=EvictionPolicy(data.get('eviction_policy', 'benefit_based')),
+                max_indexes_total=data.get('max_indexes_total', 50),
+                cache_recommendations=data.get('cache_recommendations', True),
+                recommendation_ttl_hours=data.get('recommendation_ttl_hours', 1),
+                max_analysis_time_seconds=data.get('max_analysis_time_seconds', 5),
+                enable_auto_creation=True,
+                database_host=db_params['host'],
+                database_port=db_params['port'],
+                database_name=db_params['database'],
+                database_user=db_params['user'],
+                database_password=db_params['password']
+            )
+
+            # Always create a fresh manager for this request to honor supplied DB params
+            reactive_mgr = ReactiveIndexManager(config)
+
+            reactive_results = []
+            total_created = 0
+            for q in workload_queries:
+                query_text = q.get('query', q) if isinstance(q, dict) else str(q)
+                result = run_async(reactive_mgr.process_query(query_text, force_analysis=True))
+                reactive_results.append(result)
+                total_created += len(result.get('created_indexes', []))
+
+            return jsonify({
+                'status': 'success',
+                'strategy': 'reactive',
+                'message': 'Reactive auto-create completed',
+                'created_indexes': total_created,
+                'results': _json_safe(reactive_results)
+            })
 
         # Get recommended indexes (either from request or generate them)
         recommended_indexes = data.get('recommended_indexes', [])
@@ -1723,7 +1780,8 @@ def auto_create_indexes():
             result = advisor.recommend_indexes(
                 workload_queries=workload_queries,
                 schema_info=schema_info,
-                time_limit_seconds=data.get('time_limit_seconds', 30)
+                time_limit_seconds=data.get('time_limit_seconds', 30),
+                reactive=(strategy == 'reactive')
             )
 
             # Convert recommended indexes to the expected format

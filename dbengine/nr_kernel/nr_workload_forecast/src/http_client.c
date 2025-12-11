@@ -42,23 +42,14 @@ send_http_request(const char *url, const char *json_payload)
     if (!url || !json_payload)
         return NULL;
 
-    /* Escape JSON payload for shell */
-    escaped_payload = escape_json_string(json_payload);
-    if (!escaped_payload)
-        return NULL;
-
-    /* Build curl command */
+    /* Build curl command - simplified version */
     initStringInfo(&command);
     appendStringInfo(&command,
         "curl -s -X POST "
         "-H 'Content-Type: application/json' "
-        "-H 'Connection: keep-alive' "
-        "-H 'User-Agent: nr_workload_forecast/1.0' "
         "-d '%s' "
-        "--connect-timeout 5 "
-        "--max-time 30 "
-        "'%s' ",
-        escaped_payload, url);
+        "%s ",
+        json_payload, url);
 
     ereport(DEBUG2,
             (errmsg("Sending HTTP request to %s", url)));
@@ -135,7 +126,6 @@ send_http_request(const char *url, const char *json_payload)
             (errmsg("Received HTTP response (%d bytes)", (int)response.len)));
 
     pfree(command.data);
-    pfree(escaped_payload);
 
     return response.data;
 
@@ -144,8 +134,6 @@ cleanup:
         pclose(curl_output);
     if (command.data)
         pfree(command.data);
-    if (escaped_payload)
-        pfree(escaped_payload);
     if (response.data)
         pfree(response.data);
 

@@ -8,6 +8,8 @@ file(REMOVE_RECURSE
   "CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o.d"
   "CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o"
   "CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o.d"
+  "CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o"
+  "CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o.d"
   "nr_workload_forecast.pdb"
   "nr_workload_forecast.so"
 )

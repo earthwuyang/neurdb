@@ -15,6 +15,18 @@ from typing import Dict, List, Optional, Tuple, Set, Union
 from dataclasses import dataclass, asdict
 from enum import Enum
 import numpy as np
+
+def safe_asdict(obj):
+    """Convert dataclass to dict, handling Enums properly"""
+    if hasattr(obj, '__dataclass_fields__'):
+        result = {}
+        for key, value in asdict(obj).items():
+            if isinstance(value, Enum):
+                result[key] = value.value
+            else:
+                result[key] = value
+        return result
+    return obj
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import sqlparse
@@ -188,6 +200,8 @@ class ReactiveIndexManager:
             # 3. Get recommendations
             recommendations = await self._get_recommendations(analysis)
 
+            logger.debug(f"recommendations: {recommendations}")
+
             # 4. Check if we should create any indexes
             created_indexes = []
             if self.config.enable_auto_creation and recommendations:
@@ -199,16 +213,16 @@ class ReactiveIndexManager:
             # 6. Cache the result
             if self.config.cache_recommendations:
                 self.recommendation_cache.set(query_hash, {
-                    'analysis': asdict(analysis),
-                    'recommendations': [asdict(r) for r in recommendations],
+                    'analysis': safe_asdict(analysis),
+                    'recommendations': [safe_asdict(r) for r in recommendations],
                     'created_indexes': created_indexes,
                     'processing_time': time.time() - start_time
                 })
 
             result = {
                 'query_hash': query_hash,
-                'analysis': asdict(analysis),
-                'recommendations': [asdict(r) for r in recommendations],
+                'analysis': safe_asdict(analysis),
+                'recommendations': [safe_asdict(r) for r in recommendations],
                 'created_indexes': created_indexes,
                 'processing_time': time.time() - start_time,
                 'current_storage_usage': await self._get_storage_usage()
@@ -435,7 +449,8 @@ class ReactiveIndexManager:
             recommendation_result = self.index_advisor.recommend_indexes(
                 workload_queries=workload_queries,
                 schema_info=schema_info,
-                time_limit_seconds=self.config.max_analysis_time_seconds
+                time_limit_seconds=self.config.max_analysis_time_seconds,
+                reactive = True
             )
 
             # Extract recommended indexes from ProgressiveResult
@@ -568,14 +583,17 @@ class ReactiveIndexManager:
                 index_name = f"idx_reactive_{recommendation.table_name}_{columns_str}_{timestamp}"
 
                 # Create index using budget-aware function
-                success = cursor.execute("""
-                    SELECT nr_create_index_if_budget_allows(%s, %s, %s, %s)
-                """, (
-                    index_name,
-                    recommendation.table_name,
-                    recommendation.columns,
-                    recommendation.index_type.value
-                )).fetchone()[0]
+                cursor.execute(
+                    "SELECT nr_create_index_if_budget_allows(%s, %s, %s, %s)",
+                    (
+                        index_name,
+                        recommendation.table_name,
+                        recommendation.columns,
+                        recommendation.index_type.value
+                    )
+                )
+                result = cursor.fetchone()
+                success = bool(result[0]) if result else False
 
                 conn.commit()
 
@@ -597,7 +615,7 @@ class ReactiveIndexManager:
                     )
                     return True
                 else:
-                    logger.warning(f"Failed to create index due to budget: {index_name}")
+                    logger.warning(f"Failed to create index: {index_name}")
                     return False
 
         except Exception as e:
@@ -764,6 +782,9 @@ class ReactiveIndexManager:
         try:
             conn = psycopg2.connect(**self.db_params)
             with conn.cursor() as cursor:
+                # Use storage budget provided by caller (already computed in extension)
+                budget_mb = float(self.config.storage_budget_mb)
+
                 # Get current index storage using standard PostgreSQL system catalogs
                 cursor.execute("""
                     SELECT
@@ -773,13 +794,13 @@ class ReactiveIndexManager:
                 """)
                 result = cursor.fetchone()
 
-                current_usage_mb = result[0] if result and result[0] else 0.0
-                index_count = result[1] if result and result[1] else 0
+                current_usage_mb = float(result[0]) if result and result[0] else 0.0
+                index_count = int(result[1]) if result and result[1] else 0
 
                 return {
                     'current_usage_mb': current_usage_mb,
-                    'budget_mb': self.config.storage_budget_mb,
-                    'available_mb': self.config.storage_budget_mb - current_usage_mb,
+                    'budget_mb': budget_mb,
+                    'available_mb': budget_mb - current_usage_mb,
                     'index_count': index_count
                 }
 
@@ -787,8 +808,8 @@ class ReactiveIndexManager:
             logger.error(f"Error getting storage usage: {e}")
             return {
                 'current_usage_mb': 0.0,
-                'budget_mb': self.config.storage_budget_mb,
-                'available_mb': self.config.storage_budget_mb,
+                'budget_mb': float(self.config.storage_budget_mb),
+                'available_mb': float(self.config.storage_budget_mb),
                 'index_count': 0
             }
         finally:
@@ -800,6 +821,11 @@ class ReactiveIndexManager:
         try:
             conn = psycopg2.connect(**self.db_params)
             with conn.cursor() as cursor:
+                # Get storage budget from database configuration
+                cursor.execute("SHOW nr_max_index_storage_mb")
+                budget_result = cursor.fetchone()
+                budget_mb = float(budget_result[0]) if budget_result and budget_result[0] else float(self.config.storage_budget_mb)
+
                 # Get current index storage using standard PostgreSQL system catalogs
                 cursor.execute("""
                     SELECT
@@ -814,8 +840,8 @@ class ReactiveIndexManager:
 
                 return {
                     'current_usage_mb': current_usage_mb,
-                    'budget_mb': self.config.storage_budget_mb,
-                    'available_mb': self.config.storage_budget_mb - current_usage_mb,
+                    'budget_mb': budget_mb,
+                    'available_mb': budget_mb - current_usage_mb,
                     'index_count': index_count
                 }
 
@@ -823,8 +849,8 @@ class ReactiveIndexManager:
             logger.error(f"Error getting storage usage: {e}")
             return {
                 'current_usage_mb': 0.0,
-                'budget_mb': self.config.storage_budget_mb,
-                'available_mb': self.config.storage_budget_mb,
+                'budget_mb': float(self.config.storage_budget_mb),
+                'available_mb': float(self.config.storage_budget_mb),
                 'index_count': 0
             }
         finally:

@@ -37,6 +37,13 @@ class IndexCandidate:
     index_type: IndexType
     estimated_size_mb: float = 0.0
     creation_cost: float = 0.0
+    benefit_score: float = 0.0
+
+    def __repr__(self) -> str:
+        cols = ", ".join(self.columns)
+        return (f"IndexCandidate(table={self.table_name}, cols=[{cols}], "
+                f"type={self.index_type.value}, size_mb={self.estimated_size_mb:.2f}, "
+                f"create_cost={self.creation_cost:.2f}, benefit={self.benefit_score:.4f})")
 
 
 @dataclass
@@ -47,6 +54,12 @@ class IndexConfiguration:
     storage_cost: float = 0.0
     maintenance_cost: float = 0.0
     benefit_score: float = 0.0
+
+    def __repr__(self) -> str:
+        return (f"IndexConfiguration(indexes={len(self.indexes)}, "
+                f"storage_mb={self.storage_cost:.2f}, "
+                f"maintenance_cost={self.maintenance_cost:.2f}, "
+                f"benefit_score={self.benefit_score:.4f})")
 
     def __add__(self, other_index):
         """Add an index to configuration"""
@@ -102,76 +115,51 @@ class HypoPGCostModel:
             logger.error(f"Failed to enable HypoPG: {e}")
             self.hypopg_enabled = False
 
-    def create_hypothetical_index(self, index_candidate: IndexCandidate) -> Optional[int]:
-        """Create a hypothetical index using hypopg"""
+    def create_hypothetical_index(self, cursor, index_candidate: IndexCandidate) -> Optional[int]:
+        """Create a hypothetical index using hypopg within the current session"""
         if not self.hypopg_enabled:
             return None
 
         try:
-            conn = psycopg2.connect(**self.db_params)
-            with conn.cursor() as cursor:
-                # Build CREATE INDEX statement
-                columns_str = ", ".join(index_candidate.columns)
-                # Generate a unique index name for HypoPG
-                index_name = f"hypopg_{index_candidate.table_name}_{'_'.join(index_candidate.columns)}"
+            # Build CREATE INDEX statement
+            columns_str = ", ".join(index_candidate.columns)
+            # Generate a unique index name for HypoPG
+            index_name = f"hypopg_{index_candidate.table_name}_{'_'.join(index_candidate.columns)}"
 
-                # HypoPG doesn't support USING clause for BTREE (which is default)
-                if index_candidate.index_type.value == 'btree':
-                    create_sql = f"CREATE INDEX {index_name} ON {index_candidate.table_name} ({columns_str})"
-                else:
-                    create_sql = f"CREATE INDEX {index_name} ON {index_candidate.table_name} ({columns_str}) USING {index_candidate.index_type.value}"
+            # HypoPG doesn't support USING clause for BTREE (which is default)
+            if index_candidate.index_type.value == 'btree':
+                create_sql = f"CREATE INDEX {index_name} ON {index_candidate.table_name} ({columns_str})"
+            else:
+                create_sql = f"CREATE INDEX {index_name} ON {index_candidate.table_name} ({columns_str}) USING {index_candidate.index_type.value}"
 
-                # Create hypothetical index
-                logger.info(f"Attempting to create HypoPG index: {create_sql}")
-                cursor.execute(f"SELECT hypopg_create_index('{create_sql}');")
-                result = cursor.fetchone()
-                logger.info(f"HypPG result: {result}")
+            # Create hypothetical index
+            logger.info(f"Attempting to create HypoPG index: {create_sql}")
+            cursor.execute(f"SELECT hypopg_create_index('{create_sql}');")
+            result = cursor.fetchone()
+            logger.info(f"HypPG result: {result}")
 
-                if result and result[0]:
-                    # Parse the HypoPG result to extract the OID
-                    # HypoPG typically returns a tuple with OID information
-                    index_info = str(result[0])
+            if result and result[0]:
+                index_info = str(result[0])
 
-                    # Try to extract OID from the result string
-                    # Format might be "(oid,<oid>btree_name)" or just the OID
-                    if '(' in index_info and ')' in index_info:
-                        # Extract the OID from the tuple representation
-                        oid_str = index_info.split('(')[1].split(',')[0]
-                        try:
-                            index_oid = int(oid_str)
-                            conn.close()
-                            return index_oid
-                        except ValueError:
-                            logger.warning(f"Could not parse OID from HypoPG result: {oid_str}")
-                    else:
-                        # Try to parse directly as integer
-                        try:
-                            index_oid = int(index_info)
-                            conn.close()
-                            return index_oid
-                        except ValueError:
-                            logger.warning(f"Could not parse OID from HypoPG result: {index_info}")
-
-                    conn.close()
-                    return None
-                else:
-                    conn.close()
-                    return None
-
+                # Extract the first integer we see - covers "(oid,<oid>...)" and "oid" formats
+                match = re.search(r'(\d+)', index_info)
+                if match:
+                    return int(match.group(1))
+                logger.warning(f"Could not parse OID from HypoPG result: {index_info}")
+                return None
+            else:
+                return None
         except Exception as e:
             logger.error(f"Failed to create hypothetical index: {e}")
             return None
 
-    def drop_hypothetical_index(self, index_oid: int):
-        """Drop a hypothetical index"""
+    def drop_hypothetical_index(self, cursor, index_oid: int):
+        """Drop a hypothetical index in the current session"""
         if not self.hypopg_enabled:
             return
 
         try:
-            conn = psycopg2.connect(**self.db_params)
-            with conn.cursor() as cursor:
-                cursor.execute(f"SELECT hypopg_drop_index({index_oid});")
-            conn.close()
+            cursor.execute(f"SELECT hypopg_drop_index({index_oid});")
         except Exception as e:
             logger.error(f"Failed to drop hypothetical index {index_oid}: {e}")
 
@@ -180,26 +168,26 @@ class HypoPGCostModel:
         if not self.hypopg_enabled:
             raise RuntimeError("HypoPG is required but not available. Cannot estimate query cost without HypoPG.")
 
+        conn = None
+        cursor = None
+        index_oids: List[int] = []
         try:
-            # Create all indexes in the configuration
-            index_oids = []
+            conn = psycopg2.connect(**self.db_params)
+            cursor = conn.cursor()
+            cursor.execute("SET hypopg.enabled = true;")
+
+            # Create all indexes in the configuration on the SAME session as the EXPLAIN
             for index in index_config.indexes:
-                oid = self.create_hypothetical_index(index)
+                oid = self.create_hypothetical_index(cursor, index)
                 if oid:
                     index_oids.append(oid)
 
             # Get execution plan with hypothetical indexes
-            conn = psycopg2.connect(**self.db_params)
-            with conn.cursor() as cursor:
-                explain_sql = f"EXPLAIN (FORMAT JSON) {query}"
-                cursor.execute(explain_sql)
-                plan_result = cursor.fetchone()
-
-            conn.close()
-
-            # Clean up hypothetical indexes
-            for oid in index_oids:
-                self.drop_hypothetical_index(oid)
+            explain_sql = f"EXPLAIN (FORMAT JSON) {query}"
+            cursor.execute(explain_sql)
+            plan_result = cursor.fetchone()
+            logger.debug(f"index_config: {index_config}")
+            logger.debug(f"plan_result: {plan_result}")
 
             if plan_result and plan_result[0]:
                 # Handle both string and already-parsed JSON
@@ -273,6 +261,13 @@ class HypoPGCostModel:
         except Exception as e:
             logger.error(f"Failed to estimate query cost: {e}")
             return {'startup_cost': 0.0, 'total_cost': 0.0, 'execution_time': 0.0, 'shared_blocks': 0}
+        finally:
+            if cursor:
+                for oid in index_oids:
+                    self.drop_hypothetical_index(cursor, oid)
+                cursor.close()
+            if conn:
+                conn.close()
 
     def _extract_all_plan_nodes(self, plan_node):
         """Extract all plan nodes from PostgreSQL explain output"""
@@ -539,41 +534,31 @@ class AnytimeIndexOptimizer:
         return ProgressiveResult(best_solution, quality_improvements, optimization_time)
 
     def greedy_single_index(self, workload: List[QueryCostInfo], candidates: List[IndexCandidate], baseline_costs: Dict[str, QueryCostInfo]) -> IndexConfiguration:
-        """Greedy algorithm adding best single index repeatedly"""
+        """Score each candidate once and take positives until budget is used (reactive-friendly)"""
         current_config = IndexConfiguration(indexes=[])
         remaining_budget = self.search_space.max_total_indexes
+        scored_candidates: List[Tuple[float, IndexCandidate]] = []
 
-        while remaining_budget > 0 and candidates:
-            best_candidate = None
-            best_improvement = 0.0
+        # Score each candidate independently against the empty config
+        for candidate in candidates:
+            test_config = IndexConfiguration(indexes=[candidate])
+            improvement = self._calculate_improvement(workload, IndexConfiguration(indexes=[]), test_config)
+            scored_candidates.append((improvement, candidate))
 
-            # Evaluate adding each remaining candidate
-            for candidate in candidates:
-                if candidate in current_config.indexes:
-                    continue
+        # Sort by improvement descending
+        scored_candidates.sort(key=lambda x: x[0], reverse=True)
 
-                test_config = current_config + candidate
-                improvement = self._calculate_improvement(workload, current_config, test_config)
-
-                if improvement > best_improvement:
-                    best_improvement = improvement
-                    best_candidate = candidate
-
-            if best_candidate and best_improvement > 0.0:  # Any positive improvement threshold
-                current_config = current_config + best_candidate
-                remaining_budget -= 1
-                candidates.remove(best_candidate)
-                # Update the benefit_score for the configuration
-                current_config.benefit_score = self._calculate_solution_cost(workload, baseline_costs, current_config)
-                logger.info(f"Added index: {best_candidate.table_name}({', '.join(best_candidate.columns)}) improvement: {best_improvement:.4f}")
-            else:
-                logger.info(f"No index added - best_improvement: {best_improvement:.4f}, remaining candidates: {len(candidates)}")
+        for improvement, candidate in scored_candidates:
+            if remaining_budget <= 0:
                 break
+            if improvement > 0.0:
+                candidate.benefit_score = improvement
+                current_config = current_config + candidate
+                remaining_budget -= 1
+                logger.info(f"Added index: {candidate.table_name}({', '.join(candidate.columns)}) improvement: {improvement:.4f}")
 
-        # Ensure benefit_score is set even if no indexes were added
-        if current_config.benefit_score == 0.0:
-            current_config.benefit_score = self._calculate_solution_cost(workload, baseline_costs, current_config)
-
+        # logger.debug(f"before calculate_solution_cost, baseline_costs are {baseline_costs}")
+        current_config.benefit_score = self._calculate_solution_cost(workload, baseline_costs, current_config)
         return current_config
 
     def local_search(self, current_solution: IndexConfiguration, workload: List[QueryCostInfo], candidates: List[IndexCandidate], baseline_costs: Dict[str, QueryCostInfo]) -> IndexConfiguration:
@@ -689,11 +674,8 @@ class AnytimeIndexOptimizer:
             total_improvement += weighted_improvement
             logger.debug(f"Weighted improvement for query: {weighted_improvement}, total so far: {total_improvement}")
 
-        # Subtract storage and maintenance costs
-        storage_penalty = index_config.storage_cost * 0.1  # 10% weight for storage
-        maintenance_penalty = index_config.maintenance_cost * 0.05  # 5% weight for maintenance
-
-        return max(total_improvement - storage_penalty - maintenance_penalty, 0.0)
+        # Temporarily disable storage and maintenance penalties
+        return max(total_improvement, 0.0)
 
     def _calculate_improvement(self, workload: List[QueryCostInfo], old_config: IndexConfiguration,
                            new_config: IndexConfiguration) -> float:
@@ -703,7 +685,7 @@ class AnytimeIndexOptimizer:
         new_score = self._calculate_solution_cost(workload, self.baseline_costs, new_config)
 
         # Improvement = old_cost - new_cost (positive improvement means cost reduction)
-        improvement = old_score - new_score
+        improvement =  new_score - old_score
 
         logger.info(f"Individual index improvement: {improvement:.6f} (old: {old_score:.6f}, new: {new_score:.6f})")
 
@@ -726,12 +708,33 @@ class CostBasedIndexAdvisor:
         self.optimizer = AnytimeIndexOptimizer(db_connection_params)
 
     def recommend_indexes(self, workload_queries: List[str], schema_info: Dict,
-                         time_limit_seconds: int = 60) -> ProgressiveResult:
-        """Main entry point for cost-based index recommendation"""
-        logger.info(f"Starting cost-based index optimization for {len(workload_queries)} queries")
+                         time_limit_seconds: int = 60, reactive: bool = False) -> ProgressiveResult:
+        """
+        Entry point for cost-based index recommendation.
+        When reactive=True, skip progressive search and just score candidates once.
+        """
+        logger.info(f"Starting cost-based index optimization for {len(workload_queries)} queries (reactive={reactive})")
 
         # Convert queries to QueryCostInfo objects
         query_workload = self._prepare_workload(workload_queries)
+
+        if reactive:
+            # Generate candidates and score once without iterative search
+            self.optimizer.cost_model.enable_hypog_for_session()
+            single_col_candidates = self.optimizer.search_space.generate_single_column_candidates(schema_info, query_workload)
+            multi_col_candidates = self.optimizer.search_space.generate_multi_column_candidates(schema_info, query_workload)
+            all_candidates = single_col_candidates + multi_col_candidates
+
+            baseline_costs = self.optimizer._calculate_baseline_costs(query_workload)
+            # Ensure subsequent improvement calculations see the baselines
+            self.optimizer.baseline_costs = baseline_costs
+            config = self.optimizer.greedy_single_index(query_workload, all_candidates, baseline_costs)
+
+            return ProgressiveResult(
+                best_solution=config,
+                quality_improvements=[(0, config.benefit_score)],
+                optimization_time=0.0
+            )
 
         # Run progressive optimization
         result = self.optimizer.optimize_progressively(query_workload, schema_info)
