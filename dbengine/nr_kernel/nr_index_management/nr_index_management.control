@@ -1,6 +1,6 @@
 # nr_index_management extension
 comment = 'NeurDB Index Management and Automatic Creation'
-default_version = '1.0'
+default_version = '1.2'
 module_pathname = '$libdir/nr_index_management'
 relocatable = true
 requires = 'plpgsql'

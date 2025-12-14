@@ -260,4 +260,5 @@ CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o: \
  /code/neurdb-dev/psql/include/postgresql/server/executor/execdesc.h \
  /code/neurdb-dev/psql/include/postgresql/server/utils/plancache.h \
  /code/neurdb-dev/psql/include/postgresql/server/utils/resowner.h \
- /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/include/nr_workload_forecast.h
+ /code/neurdb-dev/dbengine/nr_kernel/nr_workload_forecast/src/include/nr_workload_forecast.h \
+ /code/neurdb-dev/psql/include/postgresql/server/neurdb/guc.h

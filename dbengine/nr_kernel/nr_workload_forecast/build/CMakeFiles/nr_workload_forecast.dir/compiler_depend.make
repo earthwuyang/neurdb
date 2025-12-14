@@ -814,7 +814,8 @@ CMakeFiles/nr_workload_forecast.dir/src/nr_workload_forecast.c.o: ../src/nr_work
   /code/neurdb-dev/psql/include/postgresql/server/executor/execdesc.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/plancache.h \
   /code/neurdb-dev/psql/include/postgresql/server/utils/resowner.h \
-  ../src/include/nr_workload_forecast.h
+  ../src/include/nr_workload_forecast.h \
+  /code/neurdb-dev/psql/include/postgresql/server/neurdb/guc.h
 
 CMakeFiles/nr_workload_forecast.dir/src/query_logger.c.o: ../src/query_logger.c \
   /usr/include/stdc-predef.h \
@@ -1367,6 +1368,8 @@ CMakeFiles/nr_workload_forecast.dir/src/query_rewrite.c.o: ../src/query_rewrite.
 /code/neurdb-dev/psql/include/postgresql/server/catalog/pg_type.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/access/itup.h:
+
+/code/neurdb-dev/psql/include/postgresql/server/neurdb/guc.h:
 
 /code/neurdb-dev/psql/include/postgresql/server/utils/sortsupport.h:
 

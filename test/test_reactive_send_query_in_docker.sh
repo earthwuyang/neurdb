@@ -1,0 +1,1 @@
+/code/neurdb-dev/psql/bin/psql -d imdb_test -c "set nr_enable_auto_index_creation=true; set nr_index_management_strategy='reactive';set log_min_messages=debug; set nr_max_index_storage_mb=10000; select * from cast_info where cast_info.person_id=12345;"

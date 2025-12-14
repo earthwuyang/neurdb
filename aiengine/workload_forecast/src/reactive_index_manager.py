@@ -164,7 +164,8 @@ class ReactiveIndexManager:
             'port': config.database_port,
             'database': config.database_name,
             'user': config.database_user,
-            'password': config.database_password
+            'password': config.database_password,
+            'application_name': 'neurdb_ai',
         }
 
         # Initialize components
@@ -178,6 +179,34 @@ class ReactiveIndexManager:
         self.index_usage_stats: Dict[str, Dict] = {}
 
         logger.info("Reactive Index Manager initialized")
+
+    def update_config(self, config: ReactiveConfig) -> None:
+        """
+        Update manager configuration at runtime.
+        This is important because the Flask server keeps a singleton manager
+        across requests, while auto-creation and budget settings may change.
+        """
+        self.config = config
+        self.db_params = {
+            'host': config.database_host,
+            'port': config.database_port,
+            'database': config.database_name,
+            'user': config.database_user,
+            'password': config.database_password,
+            'application_name': 'neurdb_ai',
+        }
+
+        # Reinitialize components that depend on connection params or TTL.
+        self.index_advisor = CostBasedIndexAdvisor(self.db_params)
+        self.hypothetical_analyzer = HypotheticalIndexAnalyzer(self.db_params)
+        self.recommendation_cache.ttl_seconds = config.recommendation_ttl_hours * 3600
+
+        logger.info(
+            "ReactiveIndexManager config updated: enable_auto_creation=%s, budget=%.2fMB, min_benefit=%.3f",
+            config.enable_auto_creation,
+            config.storage_budget_mb,
+            config.min_benefit_threshold,
+        )
 
     async def process_query(self, query_text: str, force_analysis: bool = False) -> Dict:
         """
@@ -205,6 +234,7 @@ class ReactiveIndexManager:
             # 4. Check if we should create any indexes
             created_indexes = []
             if self.config.enable_auto_creation and recommendations:
+                logger.debug(f"manage index: {recommendations}")
                 created_indexes = await self._manage_indexes(recommendations, analysis)
 
             # 5. Update query history
@@ -478,7 +508,7 @@ class ReactiveIndexManager:
 
     async def _manage_indexes(self, recommendations: List[IndexCandidate], analysis: QueryAnalysis) -> List[Dict]:
         """Manage indexes based on recommendations and budget constraints"""
-        created_indexes = []
+        created_indexes: List[Dict] = []
 
         try:
             # Sort recommendations by benefit score
@@ -488,56 +518,99 @@ class ReactiveIndexManager:
             storage_usage = await self._get_storage_usage()
             available_budget = self.config.storage_budget_mb - storage_usage['current_usage_mb']
 
-            for recommendation in recommendations:
-                # Check if we have budget
-                if recommendation.estimated_size_mb <= available_budget:
-                    # Check if index already exists
-                    existing_index = await self._find_existing_index(recommendation)
+            logger.info(
+                "Reactive index management starting: %d recommendations, "
+                "current_usage=%.2fMB, budget=%.2fMB, available=%.2fMB",
+                len(recommendations),
+                storage_usage.get('current_usage_mb', 0.0),
+                self.config.storage_budget_mb,
+                available_budget,
+            )
 
-                    if not existing_index:
-                        # Create the index
-                        success = await self._create_index(recommendation)
-                        if success:
-                            created_indexes.append({
-                                'table_name': recommendation.table_name,
-                                'columns': recommendation.columns,
-                                'index_type': recommendation.index_type.value,
-                                'estimated_size_mb': recommendation.estimated_size_mb,
-                                'benefit_score': recommendation.benefit_score
-                            })
-                            available_budget -= recommendation.estimated_size_mb
-                        else:
-                            # Try eviction and retry
-                            if await self._evict_and_create(recommendation, recommendation.estimated_size_mb):
-                                created_indexes.append({
-                                    'table_name': recommendation.table_name,
-                                    'columns': recommendation.columns,
-                                    'index_type': recommendation.index_type.value,
-                                    'estimated_size_mb': recommendation.estimated_size_mb,
-                                    'benefit_score': recommendation.benefit_score,
-                                    'eviction_required': True
-                                })
-                    else:
-                        logger.debug(f"Index already exists for {recommendation.table_name} on {recommendation.columns}")
-                else:
-                    # Not enough budget, try eviction
-                    if await self._evict_and_create(recommendation, recommendation.estimated_size_mb):
+            for recommendation in recommendations:
+                logger.debug(
+                    "Considering index on %s(%s) type=%s size=%.2fMB benefit=%.3f available_budget=%.2fMB",
+                    recommendation.table_name,
+                    ",".join(recommendation.columns),
+                    recommendation.index_type.value,
+                    recommendation.estimated_size_mb,
+                    recommendation.benefit_score,
+                    available_budget,
+                )
+
+                # Check if index already exists
+                existing_index = await self._find_existing_index(recommendation)
+                if existing_index:
+                    logger.info(
+                        "Skipping existing index %s for %s(%s)",
+                        existing_index,
+                        recommendation.table_name,
+                        ",".join(recommendation.columns),
+                    )
+                    continue
+
+                # Try direct creation if budget allows
+                if recommendation.estimated_size_mb <= available_budget:
+                    index_name = await self._create_index(recommendation)
+                    if index_name:
+                        logger.info(
+                            "Successfully created reactive index %s for %s(%s) estimated_size=%.2fMB",
+                            index_name,
+                            recommendation.table_name,
+                            ",".join(recommendation.columns),
+                            recommendation.estimated_size_mb,
+                        )
                         created_indexes.append({
+                            'index_name': index_name,
                             'table_name': recommendation.table_name,
                             'columns': recommendation.columns,
                             'index_type': recommendation.index_type.value,
                             'estimated_size_mb': recommendation.estimated_size_mb,
-                            'benefit_score': recommendation.benefit_score,
-                            'eviction_required': True
+                            'benefit_score': recommendation.benefit_score
                         })
-                    else:
-                        logger.warning(f"Cannot create index - insufficient budget and eviction failed")
-                        break
+                        available_budget -= recommendation.estimated_size_mb
+                        continue
 
+                    # Direct create failed; fall through to eviction attempt
+                    logger.warning(
+                        "Direct create failed for %s(%s); attempting eviction",
+                        recommendation.table_name,
+                        ",".join(recommendation.columns),
+                    )
+
+                # Not enough budget or direct create failed, try eviction
+                evicted, created_name = await self._evict_and_create(
+                    recommendation, recommendation.estimated_size_mb
+                )
+                if created_name:
+                    logger.info(
+                        "Successfully created reactive index %s after evicting %s",
+                        created_name,
+                        evicted or "<unknown>",
+                    )
+                    created_indexes.append({
+                        'index_name': created_name,
+                        'table_name': recommendation.table_name,
+                        'columns': recommendation.columns,
+                        'index_type': recommendation.index_type.value,
+                        'estimated_size_mb': recommendation.estimated_size_mb,
+                        'benefit_score': recommendation.benefit_score,
+                        'eviction_required': True,
+                        'evicted_index': evicted,
+                    })
+                else:
+                    logger.warning(
+                        "Cannot create index for %s(%s) - insufficient budget or eviction failed",
+                        recommendation.table_name,
+                        ",".join(recommendation.columns),
+                    )
+                    break
+
+            logger.info("Reactive index management completed: %d indexes created", len(created_indexes))
             return created_indexes
 
         except Exception as e:
-            logger.error(f"Error managing indexes: {e}")
+            logger.error(f"Error managing indexes: {e}", exc_info=True)
             return created_indexes
 
     async def _find_existing_index(self, recommendation: IndexCandidate) -> Optional[str]:
@@ -569,8 +642,9 @@ class ReactiveIndexManager:
             if 'conn' in locals():
                 conn.close()
 
-    async def _create_index(self, recommendation: IndexCandidate) -> bool:
-        """Create a new index"""
+    async def _create_index(self, recommendation: IndexCandidate) -> Optional[str]:
+        """Create a new index. Returns created index name on success."""
+        index_name: Optional[str] = None
         try:
             conn = psycopg2.connect(**self.db_params)
             with conn.cursor() as cursor:
@@ -613,46 +687,46 @@ class ReactiveIndexManager:
                         access_frequency=1.0,
                         storage_cost_mb=recommendation.estimated_size_mb
                     )
-                    return True
+                    return index_name
                 else:
                     logger.warning(f"Failed to create index: {index_name}")
-                    return False
+                    return None
 
         except Exception as e:
-            logger.error(f"Error creating index {index_name}: {e}")
-            return False
+            logger.error(f"Error creating index {index_name or '<unassigned>'}: {e}", exc_info=True)
+            return None
         finally:
             if 'conn' in locals():
                 conn.close()
 
-    async def _evict_and_create(self, new_index: IndexCandidate, required_space: float) -> bool:
-        """Evict least useful index and create new one"""
+    async def _evict_and_create(self, new_index: IndexCandidate, required_space: float) -> Tuple[Optional[str], Optional[str]]:
+        """Evict least useful index and create new one. Returns (evicted_index, created_index)."""
         try:
             # Find index to evict based on policy
             index_to_evict = await self._find_index_to_evict(required_space)
 
             if not index_to_evict:
                 logger.warning("No suitable index found for eviction")
-                return False
+                return None, None
 
             # Evict the index
             success = await self._drop_index(index_to_evict)
             if not success:
                 logger.error(f"Failed to evict index {index_to_evict}")
-                return False
+                return index_to_evict, None
 
             # Create the new index
-            success = await self._create_index(new_index)
-            if not success:
+            created_name = await self._create_index(new_index)
+            if not created_name:
                 logger.error(f"Failed to create new index after eviction")
-                return False
+                return index_to_evict, None
 
-            logger.info(f"Successfully evicted {index_to_evict} and created new index")
-            return True
+            logger.info(f"Successfully evicted {index_to_evict} and created new index {created_name}")
+            return index_to_evict, created_name
 
         except Exception as e:
-            logger.error(f"Error in eviction and creation process: {e}")
-            return False
+            logger.error(f"Error in eviction and creation process: {e}", exc_info=True)
+            return None, None
 
     async def _find_index_to_evict(self, required_space: float) -> Optional[str]:
         """Find index to evict based on configured policy"""

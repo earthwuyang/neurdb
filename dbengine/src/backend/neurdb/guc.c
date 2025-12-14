@@ -201,13 +201,13 @@ notify_ai_engine_strategy_change(char *strategy)
 }
 
 /*
- * Send a rewritten query to the AI engine for reactive analysis
- * This function integrates query rewriting with AI engine communication
+ * Send a query to the AI engine for proactive/reactive index creation
+ * This function integrates query processing with AI engine communication
  */
 void
 send_reactive_query_to_ai_engine(const char *original_query)
 {
-    char *ai_engine_url = "http://localhost:8777/index/reactive/test";
+    char *ai_engine_url = "http://localhost:8777/index/reactive/manage";
     char *rewritten_query = NULL;
     char *payload;
     char *response = NULL;
@@ -236,10 +236,9 @@ send_reactive_query_to_ai_engine(const char *original_query)
                 (errmsg("NeurDB: No rewrite needed for query: %s", original_query)));
     }
 
-    /* Prepare the payload for the AI engine */
-    payload = psprintf("{\"query\": \"%s\", \"execution_time\": 100.0, \"rewritten\": %s}",
-                       escape_json_string(rewritten_query ? rewritten_query : original_query),
-                       query_modified ? "true" : "false");
+    /* Prepare the payload for the AI engine reactive index management */
+    payload = psprintf("{\"query_text\": \"%s\", \"auto_create\": true}",
+                       escape_json_string(rewritten_query ? rewritten_query : original_query));
 
     /* Send to AI engine */
     response = send_http_request(ai_engine_url, payload);
@@ -247,12 +246,14 @@ send_reactive_query_to_ai_engine(const char *original_query)
     if (response == NULL)
     {
         ereport(WARNING,
-                (errmsg("Failed to send query to AI engine for reactive analysis")));
+                (errmsg("Failed to send query to AI engine for proactive index creation")));
     }
     else
     {
+        ereport(LOG,
+                (errmsg("Successfully sent query to AI engine for proactive index management")));
         ereport(DEBUG1,
-                (errmsg("Successfully sent query to AI engine: %s", response)));
+                (errmsg("AI engine response: %s", response)));
         pfree(response);
     }
 

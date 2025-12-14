@@ -51,7 +51,7 @@ except ImportError:
 # Setup logging
 logging.basicConfig(
     level=logging.DEBUG,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(filename)s:%(lineno)d - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(os.path.join(os.path.dirname(__file__), 'workload_forecast_server.log'))
@@ -2382,6 +2382,8 @@ def reactive_recommend():
         # Initialize manager if needed
         if reactive_manager is None:
             reactive_manager = ReactiveIndexManager(config)
+        else:
+            reactive_manager.update_config(config)
 
         # Get recommendation
         result = run_async(reactive_manager.process_query(query_text, force_analysis=True))
@@ -2418,6 +2420,9 @@ def reactive_manage():
         if not query_text:
             return jsonify({'error': 'query_text is required'}), 400
 
+        # Rely on dbengine-provided auto_create flag (already derived from GUCs).
+        logger.info(f"Reactive query processing: auto_create={auto_create}")
+
         # Configuration with auto-creation enabled
         config = ReactiveConfig(
             storage_budget_mb=data.get('storage_budget_mb', 1000.0),
@@ -2437,6 +2442,8 @@ def reactive_manage():
         # Initialize manager if needed
         if reactive_manager is None:
             reactive_manager = ReactiveIndexManager(config)
+        else:
+            reactive_manager.update_config(config)
 
         # Process query with potential index creation
         result = run_async(reactive_manager.process_query(query_text, force_analysis=True))
@@ -2754,6 +2761,8 @@ if __name__ == '__main__':
 
     app.config['LOG_FILE'] = args.log_file
 
+
+if __name__ == '__main__':
     try:
         app.run(
             host=args.host,
