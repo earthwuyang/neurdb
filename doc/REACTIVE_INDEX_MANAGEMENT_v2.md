@@ -381,21 +381,30 @@ For a candidate index with estimated size `cand_size`:
 
 1. If `(current_usage + cand_size) <= budget`: create.
 2. Else attempt eviction:
-   - identify one or more reactive indexes with lowest `value_score`,
-   - drop them until enough space.
-3. Replacement rule:
-   - Only evict if candidate’s **HypoPG-estimated value** is higher than the evicted set by a margin.
+   - select a **victim set** `V` of reactive indexes to drop until enough space is freed,
+   - prefer evicting indexes with the lowest “utility per MB” first (to minimize harm).
+3. Replacement rule (victim-set total-utility gate):
+   - define an index “utility” term as the **numerator** of `value_score`:
+     - `utility(i) = wB*log1p(benefit_score_ewma(i)) + wU*log1p(touch_score_ewma(i))`
+   - estimate candidate utility `utility(cand)` using HypoPG benefit on the triggering query (or a small set of frequent queries).
+   - only evict `V` if:
+     - `utility(cand) >= (1 + min_improvement) * Σ_{v in V} utility(v)`
+   - otherwise, do nothing (budget is exceeded but the replacement is not worth it).
 
-### Candidate value estimation (before creation)
+This victim-set gate avoids the common pitfall of comparing a large new index to only the single “worst” victim: if freeing enough space requires dropping multiple low-value indexes, the decision should consider the **total** value being traded away.
 
-We estimate candidate value using HypoPG marginal benefit on a limited set of high-frequency queries:
+### Candidate utility/value estimation (before creation)
+
+We estimate candidate utility (and optional value) using HypoPG marginal benefit on a limited set of high-frequency queries:
 
 1. Choose affected queries for candidate’s table:
    - top-N by `frequency_ewma`.
 2. Compute `Δ(q,cand)` using HypoPG.
 3. Aggregate to `B_cand = Σ_q freq(q) * Δ(q,cand)`.
-4. Convert to a comparable candidate score using expected size:
-   - `value_cand ≈ wB*log1p(B_cand) / (wS*log1p(size_est)+1)`
+4. Convert to candidate utility:
+   - `utility_cand ≈ wB*log1p(B_cand) + wU*log1p(U_pred)` (with `U_pred` defaulting to `0` until the index is real and has stats)
+5. If needed for ranking candidates of different sizes, convert to a size-aware score:
+   - `value_cand ≈ utility_cand / (wS*log1p(size_est)+1)`
 
 After creation, the candidate becomes a real reactive index and starts accumulating touch/benefit EWMA in `nrim_index_registry`.
 

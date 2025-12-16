@@ -1,5 +1,0 @@
- total_indexes | total_size_mb | auto_indexes 
----------------+---------------+--------------
-             0 |             0 |            0
-(1 row)
-

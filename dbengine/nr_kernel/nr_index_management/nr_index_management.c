@@ -49,6 +49,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+#include <math.h>
 
 /* Global variables for hooks */
 static post_parse_analyze_hook_type prev_post_parse_analyze_hook = NULL;
@@ -95,17 +96,34 @@ static bool nrim_worker_ensure_registry_for_index(Oid index_oid,
                                                   const char *index_method,
                                                   double benefit_score);
 static bool nrim_worker_update_attribution(uint64 query_id, Oid index_oid, double marginal_benefit);
-static bool nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *freed_mb_out);
+static bool nrim_worker_evict_until_fits(double needed_mb, double candidate_utility, double *freed_mb_out);
+static bool nrim_worker_evict_until_fits_total_utility(double needed_mb, double candidate_utility, double *freed_mb_out);
 static bool nrim_worker_run_psql_utility(Oid dboid, const char *sql);
 static char *nrim_worker_build_index_name(Oid relid, AttrNumber *cols, int ncols, uint64 query_id);
 static bool nrim_parse_candidates_json(const char *candidates_json, List **out_cands);
 static bool nrim_worker_has_default_btree_opclass(Oid typoid);
+static void nrim_worker_refresh_db_gucs(Oid dboid);
 static bool collect_var_attnum(Query *query, Var *var, Oid *relid_out, AttrNumber *attnum_out);
 static bool is_equality_op(Oid opno);
 static bool is_range_op(Oid opno);
 
 #define NRIM_ELOG(fmt, ...) \
     ereport(nr_reactive_debug ? LOG : DEBUG1, (errmsg(fmt, ##__VA_ARGS__)))
+
+static inline double
+nrim_log1p_nonneg(double x)
+{
+    if (x <= 0.0)
+        return 0.0;
+    return log(1.0 + x);
+}
+
+static inline double
+nrim_index_utility(double benefit_score, double touch_score)
+{
+    /* Keep consistent with the numerator used by value_score in SQL. */
+    return nrim_log1p_nonneg(benefit_score) + 0.1 * nrim_log1p_nonneg(touch_score);
+}
 
 static char *nrim_preview_text(const char *s, int max_bytes);
 void index_management_post_parse_analyze(ParseState *pstate, Query *query, JumbleState *jstate);
@@ -730,6 +748,112 @@ nrim_worker_sighup_handler(SIGNAL_ARGS)
     if (MyLatch)
         SetLatch(MyLatch);
     errno = save_errno;
+}
+
+static char *
+nrim_worker_lookup_db_setting_value(const char *name, Oid dboid, Oid roleid)
+{
+    StringInfoData sql;
+    char *pattern;
+    char *val = NULL;
+    int rc;
+
+    if (name == NULL || name[0] == '\0')
+        return NULL;
+
+    pattern = psprintf("%s=%%", name);
+
+    initStringInfo(&sql);
+    appendStringInfo(&sql,
+                     "SELECT substr(cfg, %d) AS val "
+                     "FROM ("
+                     "  SELECT unnest(setconfig) AS cfg, 1 AS ord FROM pg_db_role_setting WHERE setdatabase=%u AND setrole=%u "
+                     "  UNION ALL "
+                     "  SELECT unnest(setconfig) AS cfg, 2 AS ord FROM pg_db_role_setting WHERE setdatabase=0 AND setrole=%u "
+                     "  UNION ALL "
+                     "  SELECT unnest(setconfig) AS cfg, 3 AS ord FROM pg_db_role_setting WHERE setdatabase=%u AND setrole=0 "
+                     "  UNION ALL "
+                     "  SELECT unnest(setconfig) AS cfg, 4 AS ord FROM pg_db_role_setting WHERE setdatabase=0 AND setrole=0 "
+                     ") s "
+                     "WHERE cfg LIKE %s "
+                     "ORDER BY ord "
+                     "LIMIT 1",
+                     (int) (strlen(name) + 2),
+                     dboid, roleid,
+                     roleid,
+                     dboid,
+                     quote_literal_cstr(pattern));
+
+    pfree(pattern);
+
+    rc = SPI_execute(sql.data, true, 1);
+    pfree(sql.data);
+    if (rc != SPI_OK_SELECT || SPI_processed < 1)
+        return NULL;
+
+    val = SPI_getvalue(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1);
+    if (val == NULL)
+        return NULL;
+
+    return val;
+}
+
+/*
+ * Background workers don't automatically pick up ALTER DATABASE/ROLE SET
+ * changes (pg_db_role_setting) because those are applied at session start.
+ * Refresh a small set of critical runtime GUCs on SIGHUP / periodically.
+ */
+static void
+nrim_worker_refresh_db_gucs(Oid dboid)
+{
+    Oid roleid;
+    char *newval;
+    const char *oldval;
+
+    roleid = GetUserId();
+
+    StartTransactionCommand();
+    PushActiveSnapshot(GetTransactionSnapshot());
+    if (SPI_connect() != SPI_OK_CONNECT)
+    {
+        PopActiveSnapshot();
+        AbortCurrentTransaction();
+        return;
+    }
+
+    /* nr_max_index_storage_mb */
+    newval = nrim_worker_lookup_db_setting_value("nr_max_index_storage_mb", dboid, roleid);
+    if (newval)
+    {
+        oldval = GetConfigOption("nr_max_index_storage_mb", true, false);
+        if (oldval == NULL || strcmp(oldval, newval) != 0)
+        {
+            (void) SetConfigOption("nr_max_index_storage_mb", newval, PGC_SUSET, PGC_S_SESSION);
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: applied db setting nr_max_index_storage_mb=%s (was %s)",
+                          newval, oldval ? oldval : "(null)");
+        }
+        pfree(newval);
+    }
+
+    /* nr_enable_auto_index_creation */
+    newval = nrim_worker_lookup_db_setting_value("nr_enable_auto_index_creation", dboid, roleid);
+    if (newval)
+    {
+        oldval = GetConfigOption("nr_enable_auto_index_creation", true, false);
+        if (oldval == NULL || strcmp(oldval, newval) != 0)
+        {
+            (void) SetConfigOption("nr_enable_auto_index_creation", newval, PGC_SUSET, PGC_S_SESSION);
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: applied db setting nr_enable_auto_index_creation=%s (was %s)",
+                          newval, oldval ? oldval : "(null)");
+        }
+        pfree(newval);
+    }
+
+    SPI_finish();
+    PopActiveSnapshot();
+    CommitTransactionCommand();
 }
 
 static uint64
@@ -1483,9 +1607,12 @@ nrim_parse_candidates_json(const char *candidates_json, List **out_cands)
 }
 
 static bool
-nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *freed_mb_out)
+nrim_worker_evict_until_fits(double needed_mb, double candidate_utility, double *freed_mb_out)
 {
+    return nrim_worker_evict_until_fits_total_utility(needed_mb, candidate_utility, freed_mb_out);
+#if 0
     double freed_mb = 0.0;
+    int safety_iters = 0;
 
     if (freed_mb_out)
         *freed_mb_out = 0.0;
@@ -1495,6 +1622,13 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
 
     for (;;)
     {
+        if (++safety_iters > 1000)
+        {
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: eviction stopped (safety limit reached) needed_mb=%.3f", needed_mb);
+            break;
+        }
+
         int rc;
         bool isnull;
         Oid index_oid = InvalidOid;
@@ -1503,19 +1637,26 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
         char *idx_relname = NULL;
         char *idx_nspname = NULL;
         char *drop_sql;
+        double threshold = 0.0;
 
         rc = SPI_execute(
-            "SELECT index_oid, "
-            "       COALESCE(size_bytes, pg_relation_size(index_oid))::double precision / 1024.0 / 1024.0 AS size_mb, "
-            "       value_score "
-            "FROM nrim.nrim_index_registry "
-            "WHERE state = 'created' "
-            "ORDER BY value_score ASC, created_at ASC "
+            "SELECT r.index_oid, "
+            "       COALESCE(r.size_bytes, pg_relation_size(r.index_oid))::double precision / 1024.0 / 1024.0 AS size_mb, "
+            "       r.value_score "
+            "FROM nrim.nrim_index_registry r "
+            "JOIN pg_class c ON c.oid = r.index_oid AND c.relkind = 'i' "
+            "WHERE r.state = 'created' "
+            "ORDER BY r.value_score ASC, r.created_at ASC "
             "LIMIT 1",
             true, 1);
 
         if (rc != SPI_OK_SELECT || SPI_processed < 1)
+        {
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: eviction stopped (no evictable index rows) rc=%d processed=%llu needed_mb=%.3f",
+                          rc, (unsigned long long) SPI_processed, needed_mb);
             break;
+        }
 
         {
             Datum d_oid = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
@@ -1538,17 +1679,77 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
         if (!OidIsValid(index_oid))
             break;
 
-        if (candidate_value <= idx_value * (1.0 + nr_reactive_min_value_improvement))
-            break;
+        threshold = idx_value * (1.0 + nr_reactive_min_value_improvement);
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: eviction victim selected index_oid=%u victim_value=%.6f threshold=%.6f candidate_value=%.6f victim_mb=%.3f needed_mb=%.3f",
+                      index_oid, idx_value, threshold, candidate_value, idx_mb, needed_mb);
+
+        /*
+         * The registry can become stale if indexes are dropped outside of NRIM
+         * (manual DROP INDEX, database restore, crash/recovery, etc.). If the
+         * OID no longer exists, remove it from the registry and keep going.
+         */
+        {
+            char *qexists = psprintf("SELECT 1 FROM pg_class WHERE oid=%u AND relkind='i' LIMIT 1", index_oid);
+            int rcx = SPI_execute(qexists, true, 1);
+            pfree(qexists);
+            if (rcx != SPI_OK_SELECT || SPI_processed < 1)
+            {
+                if (nr_reactive_debug)
+                    NRIM_ELOG("NRIM v2 worker: eviction skipping stale registry row index_oid=%u (missing in pg_class)", index_oid);
+                {
+                    char *qdel = psprintf("DELETE FROM nrim.nrim_index_registry WHERE index_oid=%u", index_oid);
+                    (void) SPI_execute(qdel, false, 0);
+                    pfree(qdel);
+                }
+                CommandCounterIncrement();
+                continue;
+            }
+        }
 
         idx_relname = get_rel_name(index_oid);
         idx_nspname = get_namespace_name(get_rel_namespace(index_oid));
         if (idx_relname == NULL || idx_nspname == NULL)
         {
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: eviction skipping victim (could not resolve victim name) index_oid=%u", index_oid);
             if (idx_relname) pfree(idx_relname);
             if (idx_nspname) pfree(idx_nspname);
+            {
+                char *qdel = psprintf("DELETE FROM nrim.nrim_index_registry WHERE index_oid=%u", index_oid);
+                (void) SPI_execute(qdel, false, 0);
+                pfree(qdel);
+            }
+            CommandCounterIncrement();
+            continue;
+        }
+
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: eviction value-gate candidate_value=%.6f victim=%s.%s victim_value=%.6f threshold=%.6f (min_improvement=%.3f)",
+                      candidate_value,
+                      idx_nspname,
+                      idx_relname,
+                      idx_value,
+                      threshold,
+                      nr_reactive_min_value_improvement);
+
+        if (candidate_value <= threshold)
+        {
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: eviction blocked (candidate not sufficiently better); needed_mb=%.3f victim_mb=%.3f",
+                          needed_mb, idx_mb);
+            pfree(idx_relname);
+            pfree(idx_nspname);
             break;
         }
+
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: eviction allowed; will drop victim to free_mb=%.3f (needed_mb=%.3f)",
+                      idx_mb, needed_mb);
+
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: evict candidate index_oid=%u idx_value=%.6f idx_mb=%.3f needed_mb=%.3f",
+                      index_oid, idx_value, idx_mb, needed_mb);
 
         {
             char *q = psprintf("UPDATE nrim.nrim_index_registry SET state='dropping' WHERE index_oid=%u", index_oid);
@@ -1560,6 +1761,16 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
                             nr_reactive_use_concurrently ? "CONCURRENTLY" : "",
                             quote_identifier(idx_nspname),
                             quote_identifier(idx_relname));
+
+        /*
+         * idx_relname/idx_nspname are allocated in the current transaction
+         * memory context; we'll commit/restart around the DROP INDEX, so free
+         * them now to avoid use-after-free on later pfree() paths.
+         */
+        pfree(idx_relname);
+        pfree(idx_nspname);
+        idx_relname = NULL;
+        idx_nspname = NULL;
 
         /*
          * DROP INDEX CONCURRENTLY cannot run inside a transaction block.
@@ -1575,6 +1786,13 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
             pfree(drop_sql);
             drop_sql = drop_sql_persist;
 
+            if (nr_reactive_debug)
+            {
+                char *sqlprev = nrim_preview_text(drop_sql, 200);
+                NRIM_ELOG("NRIM v2 worker: evict dropping sql=\"%s\"", sqlprev);
+                pfree(sqlprev);
+            }
+
             SPI_finish();
             PopActiveSnapshot();
             CommitTransactionCommand();
@@ -1588,14 +1806,14 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
                     PopActiveSnapshot();
                     AbortCurrentTransaction();
                     pfree(drop_sql);
-                    pfree(idx_relname);
-                    pfree(idx_nspname);
+                    if (idx_relname) pfree(idx_relname);
+                    if (idx_nspname) pfree(idx_nspname);
                     return false;
                 }
 
                 pfree(drop_sql);
-                pfree(idx_relname);
-                pfree(idx_nspname);
+                if (idx_relname) pfree(idx_relname);
+                if (idx_nspname) pfree(idx_nspname);
                 break;
             }
 
@@ -1606,10 +1824,13 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
                 PopActiveSnapshot();
                 AbortCurrentTransaction();
                 pfree(drop_sql);
-                pfree(idx_relname);
-                pfree(idx_nspname);
+                if (idx_relname) pfree(idx_relname);
+                if (idx_nspname) pfree(idx_nspname);
                 return false;
             }
+
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: evict DROP INDEX succeeded index_oid=%u freed_mb=%.3f", index_oid, idx_mb);
 
             pfree(drop_sql);
         }
@@ -1623,8 +1844,8 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
         freed_mb += idx_mb;
         needed_mb -= idx_mb;
 
-        pfree(idx_relname);
-        pfree(idx_nspname);
+        if (idx_relname) pfree(idx_relname);
+        if (idx_nspname) pfree(idx_nspname);
 
         if (needed_mb <= 0.0)
             break;
@@ -1634,6 +1855,296 @@ nrim_worker_evict_until_fits(double needed_mb, double candidate_value, double *f
         *freed_mb_out = freed_mb;
 
     return (needed_mb <= 0.0);
+#endif
+}
+
+static bool
+nrim_worker_evict_until_fits_total_utility(double needed_mb, double candidate_utility, double *freed_mb_out)
+{
+    typedef struct NrimEvictVictim
+    {
+        Oid index_oid;
+        double size_mb;
+        double utility;
+        char *ident;   /* schema.name */
+        char *drop_sql;
+    } NrimEvictVictim;
+
+    double freed_mb = 0.0;
+    double victim_utility_sum = 0.0;
+    List *victims = NIL;
+    ListCell *lc;
+    int rc;
+
+    if (freed_mb_out)
+        *freed_mb_out = 0.0;
+
+    if (needed_mb <= 0.0)
+        return true;
+
+    /*
+     * Phase 1: pick a victim set V to free enough MB while minimizing lost
+     * utility per MB. Do not DROP until the victim-set total-utility gate
+     * passes.
+     */
+    rc = SPI_execute(
+        "SELECT r.index_oid, "
+        "       COALESCE(r.size_bytes, pg_relation_size(r.index_oid))::double precision / 1024.0 / 1024.0 AS size_mb, "
+        "       COALESCE(r.benefit_score_ewma, 0)::double precision AS benefit_score, "
+        "       COALESCE(r.touch_score_ewma, 0)::double precision AS touch_score "
+        "FROM nrim.nrim_index_registry r "
+        "JOIN pg_class c ON c.oid = r.index_oid AND c.relkind = 'i' "
+        "WHERE r.state = 'created' "
+        "ORDER BY ( (ln(1 + COALESCE(r.benefit_score_ewma,0)) + 0.1 * ln(1 + COALESCE(r.touch_score_ewma,0))) "
+        "           / (COALESCE(r.size_bytes, pg_relation_size(r.index_oid))::double precision / 1024.0 / 1024.0 + 1e-6) ) ASC, "
+        "         r.created_at ASC",
+        true, 0);
+
+    if (rc != SPI_OK_SELECT)
+    {
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: eviction selection query failed rc=%d needed_mb=%.3f", rc, needed_mb);
+        return false;
+    }
+
+    for (uint64 row = 0; row < SPI_processed && freed_mb < needed_mb; row++)
+    {
+        bool isnull;
+        Oid index_oid = InvalidOid;
+        double idx_mb = 0.0;
+        double benefit_score = 0.0;
+        double touch_score = 0.0;
+        double util = 0.0;
+        char *idx_relname = NULL;
+        char *idx_nspname = NULL;
+        char *ident = NULL;
+        char *drop_sql = NULL;
+        NrimEvictVictim *v = NULL;
+
+        {
+            Datum d_oid = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 1, &isnull);
+            if (!isnull)
+                index_oid = DatumGetObjectId(d_oid);
+        }
+        {
+            Datum d_mb = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 2, &isnull);
+            if (!isnull)
+                idx_mb = DatumGetFloat8(d_mb);
+        }
+        {
+            Datum d_b = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 3, &isnull);
+            if (!isnull)
+                benefit_score = DatumGetFloat8(d_b);
+        }
+        {
+            Datum d_t = SPI_getbinval(SPI_tuptable->vals[row], SPI_tuptable->tupdesc, 4, &isnull);
+            if (!isnull)
+                touch_score = DatumGetFloat8(d_t);
+        }
+
+        if (!OidIsValid(index_oid))
+            continue;
+
+        if (idx_mb <= 0.0)
+            idx_mb = 0.001;
+
+        util = nrim_index_utility(benefit_score, touch_score);
+
+        idx_relname = get_rel_name(index_oid);
+        idx_nspname = get_namespace_name(get_rel_namespace(index_oid));
+        if (idx_relname == NULL || idx_nspname == NULL)
+        {
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: eviction selection skipping victim (could not resolve name) index_oid=%u", index_oid);
+            if (idx_relname) pfree(idx_relname);
+            if (idx_nspname) pfree(idx_nspname);
+            {
+                char *qdel = psprintf("DELETE FROM nrim.nrim_index_registry WHERE index_oid=%u", index_oid);
+                (void) SPI_execute(qdel, false, 0);
+                pfree(qdel);
+            }
+            CommandCounterIncrement();
+            continue;
+        }
+
+        ident = psprintf("%s.%s", idx_nspname, idx_relname);
+        drop_sql = psprintf("DROP INDEX %s %s.%s",
+                            nr_reactive_use_concurrently ? "CONCURRENTLY" : "",
+                            quote_identifier(idx_nspname),
+                            quote_identifier(idx_relname));
+
+        {
+            MemoryContext oldcxt = MemoryContextSwitchTo(TopMemoryContext);
+            v = palloc0(sizeof(*v));
+            v->index_oid = index_oid;
+            v->size_mb = idx_mb;
+            v->utility = util;
+            v->ident = pstrdup(ident);
+            v->drop_sql = pstrdup(drop_sql);
+            victims = lappend(victims, v);
+            MemoryContextSwitchTo(oldcxt);
+        }
+
+        freed_mb += idx_mb;
+        victim_utility_sum += util;
+
+        if (nr_reactive_debug)
+        {
+            double util_per_mb = util / idx_mb;
+            NRIM_ELOG("NRIM v2 worker: eviction candidate victim index_oid=%u victim=%s size_mb=%.3f utility=%.6f utility_per_mb=%.6f freed_mb=%.3f needed_mb=%.3f",
+                      index_oid, ident, idx_mb, util, util_per_mb, freed_mb, needed_mb);
+        }
+
+        pfree(idx_relname);
+        pfree(idx_nspname);
+        pfree(ident);
+        pfree(drop_sql);
+    }
+
+    if (freed_mb < needed_mb)
+    {
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: eviction stopped (insufficient evictable space) freed_mb=%.3f needed_mb=%.3f",
+                      freed_mb, needed_mb);
+        foreach(lc, victims)
+        {
+            NrimEvictVictim *v = (NrimEvictVictim *) lfirst(lc);
+            if (v->ident) pfree(v->ident);
+            if (v->drop_sql) pfree(v->drop_sql);
+            pfree(v);
+        }
+        list_free(victims);
+        return false;
+    }
+
+    {
+        double threshold = victim_utility_sum * (1.0 + nr_reactive_min_value_improvement);
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: eviction total-utility gate candidate_utility=%.6f victim_utility_sum=%.6f threshold=%.6f (min_improvement=%.3f) victims=%d",
+                      candidate_utility, victim_utility_sum, threshold, nr_reactive_min_value_improvement, list_length(victims));
+
+        if (candidate_utility <= threshold)
+        {
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: eviction blocked (candidate utility not enough to justify victim set) candidate_utility=%.6f threshold=%.6f",
+                          candidate_utility, threshold);
+            foreach(lc, victims)
+            {
+                NrimEvictVictim *v = (NrimEvictVictim *) lfirst(lc);
+                if (v->ident) pfree(v->ident);
+                if (v->drop_sql) pfree(v->drop_sql);
+                pfree(v);
+            }
+            list_free(victims);
+            return false;
+        }
+    }
+
+    /* Phase 2: mark victims and drop outside the SPI transaction. */
+    foreach(lc, victims)
+    {
+        NrimEvictVictim *v = (NrimEvictVictim *) lfirst(lc);
+        char *q = psprintf("UPDATE nrim.nrim_index_registry SET state='dropping' WHERE index_oid=%u", v->index_oid);
+        (void) SPI_execute(q, false, 0);
+        pfree(q);
+    }
+    CommandCounterIncrement();
+
+    freed_mb = 0.0;
+    foreach(lc, victims)
+    {
+        NrimEvictVictim *v = (NrimEvictVictim *) lfirst(lc);
+
+        if (nr_reactive_debug)
+        {
+            char *sqlprev = nrim_preview_text(v->drop_sql, 200);
+            NRIM_ELOG("NRIM v2 worker: eviction dropping victim=%s index_oid=%u size_mb=%.3f utility=%.6f sql=\"%s\"",
+                      v->ident ? v->ident : "(unknown)",
+                      v->index_oid,
+                      v->size_mb,
+                      v->utility,
+                      sqlprev);
+            pfree(sqlprev);
+        }
+
+        SPI_finish();
+        PopActiveSnapshot();
+        CommitTransactionCommand();
+
+        if (!nrim_worker_run_psql_utility(MyDatabaseId, v->drop_sql))
+        {
+            StartTransactionCommand();
+            PushActiveSnapshot(GetTransactionSnapshot());
+            if (SPI_connect() != SPI_OK_CONNECT)
+            {
+                PopActiveSnapshot();
+                AbortCurrentTransaction();
+                goto eviction_fail;
+            }
+
+            if (nr_reactive_debug)
+                NRIM_ELOG("NRIM v2 worker: eviction DROP INDEX failed index_oid=%u victim=%s",
+                          v->index_oid, v->ident ? v->ident : "(unknown)");
+            goto eviction_fail;
+        }
+
+        StartTransactionCommand();
+        PushActiveSnapshot(GetTransactionSnapshot());
+        if (SPI_connect() != SPI_OK_CONNECT)
+        {
+            PopActiveSnapshot();
+            AbortCurrentTransaction();
+            goto eviction_fail;
+        }
+
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: eviction DROP INDEX succeeded index_oid=%u victim=%s freed_mb=%.3f",
+                      v->index_oid, v->ident ? v->ident : "(unknown)", v->size_mb);
+
+        {
+            char *q = psprintf("DELETE FROM nrim.nrim_query_index_attribution WHERE index_oid=%u", v->index_oid);
+            (void) SPI_execute(q, false, 0);
+            pfree(q);
+        }
+        {
+            char *q = psprintf("DELETE FROM nrim.nrim_index_registry WHERE index_oid=%u", v->index_oid);
+            (void) SPI_execute(q, false, 0);
+            pfree(q);
+        }
+        CommandCounterIncrement();
+
+        freed_mb += v->size_mb;
+        needed_mb -= v->size_mb;
+        if (needed_mb <= 0.0)
+            break;
+    }
+
+    if (freed_mb_out)
+        *freed_mb_out = freed_mb;
+
+    foreach(lc, victims)
+    {
+        NrimEvictVictim *v = (NrimEvictVictim *) lfirst(lc);
+        if (v->ident) pfree(v->ident);
+        if (v->drop_sql) pfree(v->drop_sql);
+        pfree(v);
+    }
+    list_free(victims);
+
+    return (needed_mb <= 0.0);
+
+eviction_fail:
+    if (freed_mb_out)
+        *freed_mb_out = freed_mb;
+    foreach(lc, victims)
+    {
+        NrimEvictVictim *v = (NrimEvictVictim *) lfirst(lc);
+        if (v->ident) pfree(v->ident);
+        if (v->drop_sql) pfree(v->drop_sql);
+        pfree(v);
+    }
+    list_free(victims);
+    return false;
 }
 
 static bool
@@ -1736,6 +2247,9 @@ nrim_process_one_work_item(Oid dboid)
 	        double best_benefit = 0.0;
 	        double best_value = 0.0;
 	        double best_size_mb = 0.0;
+	        double query_freq_ewma = 1.0;
+	        double candidate_benefit_score = 0.0;
+	        double candidate_utility = 0.0;
 	        Oid best_relid = InvalidOid;
 	        int best_ncols = 0;
 	        AttrNumber best_cols[8];
@@ -2002,6 +2516,32 @@ nrim_process_one_work_item(Oid dboid)
 	            NRIM_ELOG("NRIM v2 worker: selected best relid=%u ncols=%d benefit=%.6f size_mb=%.3f value=%.6f",
 	                      best->relid, best->ncols, best_benefit, best_size_mb, best_value);
 
+        /*
+         * Candidate utility for eviction gating (victim-set total utility):
+         * use the triggering query's frequency EWMA as a workload weight.
+         */
+        {
+            bool isnull;
+            char *qf = psprintf("SELECT frequency_ewma FROM nrim.nrim_query_facts WHERE query_id=%lld",
+                                (long long) query_id);
+            if (SPI_execute(qf, true, 1) == SPI_OK_SELECT && SPI_processed > 0)
+            {
+                Datum d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+                if (!isnull)
+                    query_freq_ewma = DatumGetFloat8(d);
+            }
+            pfree(qf);
+        }
+        if (query_freq_ewma <= 0.0)
+            query_freq_ewma = 1.0;
+
+        candidate_benefit_score = best_benefit * query_freq_ewma;
+        candidate_utility = nrim_index_utility(candidate_benefit_score, 0.0);
+
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2 worker: candidate scoring freq_ewma=%.6f benefit=%.6f benefit_score=%.6f candidate_utility=%.6f",
+                      query_freq_ewma, best_benefit, candidate_benefit_score, candidate_utility);
+
         if (!nr_enable_auto_index_creation)
         {
             char *err_lit = quote_literal_cstr("auto-creation disabled in worker session (set via ALTER SYSTEM SET nr_enable_auto_index_creation=on; SELECT pg_reload_conf())");
@@ -2043,7 +2583,11 @@ nrim_process_one_work_item(Oid dboid)
                               current_mb, budget_mb, best_size_mb, needed_mb);
                 if (needed_mb > 0.0)
                 {
-                    if (!nrim_worker_evict_until_fits(needed_mb, best_value, NULL))
+                    if (nr_reactive_debug)
+                        NRIM_ELOG("NRIM v2 worker: eviction attempt needed_mb=%.3f candidate_utility=%.6f victim_set_gate=min_improvement=%.3f",
+                                  needed_mb, candidate_utility, nr_reactive_min_value_improvement);
+
+                    if (!nrim_worker_evict_until_fits(needed_mb, candidate_utility, NULL))
                     {
                         char *err_lit = quote_literal_cstr("budget exceeded and eviction not beneficial/insufficient");
                         char *q = psprintf("UPDATE nrim.nrim_work_queue SET status='done', last_error=%s WHERE id=%lld",
@@ -2215,11 +2759,109 @@ nrim_process_one_work_item(Oid dboid)
                 if (nr_reactive_debug)
                     NRIM_ELOG("NRIM v2 worker: CREATE INDEX succeeded, index lookup nsp=%s idxname=%s oid=%u",
                               nspname, idxname, index_oid);
-	                if (OidIsValid(index_oid))
-	                {
-	                    (void) nrim_worker_ensure_registry_for_index(index_oid, best_relid, best_cols, best_ncols, "btree", best_benefit);
-	                    (void) nrim_worker_update_attribution(query_id, index_oid, best_benefit);
-	                }
+                if (OidIsValid(index_oid))
+                {
+                    (void) nrim_worker_ensure_registry_for_index(index_oid, best_relid, best_cols, best_ncols, "btree", best_benefit);
+                    (void) nrim_worker_update_attribution(query_id, index_oid, best_benefit);
+
+                    /*
+                     * Post-create enforcement: HypoPG relation-size estimates can
+                     * under-estimate real index size; re-check actual budget after
+                     * the index is created and evict (or drop the new index) if
+                     * we ended up over budget.
+                     */
+                    {
+                        bool isnull;
+                        double current_mb = 0.0;
+                        double budget_mb = 0.0;
+                        double needed_mb = 0.0;
+
+                        if (SPI_execute("SELECT nr_get_current_index_storage_mb()", false, 1) == SPI_OK_SELECT && SPI_processed > 0)
+                        {
+                            Datum d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+                            if (!isnull)
+                                current_mb = DatumGetFloat8(d);
+                        }
+                        if (SPI_execute("SELECT nr_calculate_index_budget_mb()", false, 1) == SPI_OK_SELECT && SPI_processed > 0)
+                        {
+                            Datum d = SPI_getbinval(SPI_tuptable->vals[0], SPI_tuptable->tupdesc, 1, &isnull);
+                            if (!isnull)
+                                budget_mb = DatumGetFloat8(d);
+                        }
+
+                        if (budget_mb > 0.0)
+                            needed_mb = current_mb - budget_mb;
+
+                        if (needed_mb > 0.0)
+                        {
+                            if (nr_reactive_debug)
+                                NRIM_ELOG("NRIM v2 worker: post-create budget exceeded current_mb=%.3f budget_mb=%.3f needed_mb=%.3f",
+                                          current_mb, budget_mb, needed_mb);
+
+                            if (!nrim_worker_evict_until_fits(needed_mb, candidate_utility, NULL))
+                            {
+                                /* Can't evict enough; drop the just-created index. */
+                                char *drop_sql = psprintf("DROP INDEX %s %s.%s",
+                                                          nr_reactive_use_concurrently ? "CONCURRENTLY" : "",
+                                                          quote_identifier(nspname),
+                                                          quote_identifier(idxname));
+
+                                if (nr_reactive_debug)
+                                    NRIM_ELOG("NRIM v2 worker: post-create eviction failed; dropping newly created index sql=\"%s\"",
+                                              drop_sql);
+
+                                SPI_finish();
+                                PopActiveSnapshot();
+                                CommitTransactionCommand();
+
+                                (void) nrim_worker_run_psql_utility(dboid, drop_sql);
+                                pfree(drop_sql);
+
+                                StartTransactionCommand();
+                                PushActiveSnapshot(GetTransactionSnapshot());
+                                if (SPI_connect() != SPI_OK_CONNECT)
+                                {
+                                    PopActiveSnapshot();
+                                    AbortCurrentTransaction();
+                                    pfree(create.data);
+                                    pfree(idxname);
+                                    pfree(nspname);
+                                    pfree(relname);
+                                    pfree(query_text);
+                                    if (candidates_json) pfree(candidates_json);
+                                    return true;
+                                }
+
+                                {
+                                    char *q = psprintf("DELETE FROM nrim.nrim_index_registry WHERE index_oid=%u", index_oid);
+                                    (void) SPI_execute(q, false, 0);
+                                    pfree(q);
+                                }
+                                {
+                                    char *q = psprintf("DELETE FROM nrim.nrim_query_index_attribution WHERE query_id=%lld AND index_oid=%u",
+                                                       (long long) query_id, index_oid);
+                                    (void) SPI_execute(q, false, 0);
+                                    pfree(q);
+                                }
+                                {
+                                    char *err_lit = quote_literal_cstr("budget exceeded after creation; dropped newly created index");
+                                    char *q = psprintf("UPDATE nrim.nrim_work_queue SET status='done', last_error=%s WHERE id=%lld",
+                                                       err_lit,
+                                                       (long long) work_id);
+                                    (void) SPI_execute(q, false, 0);
+                                    pfree(q);
+                                    pfree(err_lit);
+                                }
+
+                                pfree(create.data);
+                                pfree(idxname);
+                                pfree(nspname);
+                                pfree(relname);
+                                goto done_tx;
+                            }
+                        }
+                    }
+                }
                 else
                 {
                     if (nr_reactive_debug)
@@ -2267,6 +2909,7 @@ nrim_worker_main(Datum main_arg)
                            PGC_USERSET, PGC_S_OVERRIDE);
 
     ereport(LOG, (errmsg("NRIM v2 worker: started (dboid=%u)", dboid)));
+    nrim_worker_refresh_db_gucs(dboid);
 
     /* Ensure single active worker per database */
     {
@@ -2296,6 +2939,7 @@ nrim_worker_main(Datum main_arg)
             ProcessConfigFile(PGC_SIGHUP);
             NRIM_ELOG("NRIM v2 worker: reloaded config (nr_reactive.debug=%s)",
                       nr_reactive_debug ? "on" : "off");
+            nrim_worker_refresh_db_gucs(dboid);
         }
 
         for (int i = 0; i < 5; i++)

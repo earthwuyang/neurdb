@@ -1,137 +1,0 @@
-==========================================
-NeurDB Benchmark with DriftBench
-Duration: 30s
-Output: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_185711
-==========================================
-
-==========================================
-PHASE 1: Benchmark WITHOUT Auto-Index
-==========================================
-📊 Capturing initial state (auto-index disabled)...
-🔧 Disabling automatic index creation...
-🔧 Setting nr_enable_auto_index_creation = off
-✅ GUC parameter set to off (current: off)
-   ✅ AI Engine is accessible on port 8777
-   ⏸️  Auto-index creation is now DISABLED
-🔄 Restarting PostgreSQL to apply system GUC changes...
-Database connected, no restart needed for session-level setting
-📊 Capturing state after disabling auto-index...
-🚀 Running workload (no auto-index, 30s)...
-🚀 Starting DriftBench workload (noauto mode, 30s)...
-📋 Directly invoking DriftBench test module...
-   PYTHONPATH: /Volumes/data/DB/DriftBench:
-   DB Connection: neurdb@localhost:15432/imdb_ori
-   Results Dir: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_185711/driftbench_noauto
-2025-12-08 18:57:12,540 - INFO - 🧪 Running in QUICK TEST MODE - Limited to 100 queries per scenario
-2025-12-08 18:57:12,582 - INFO - ✅ Connected to NeurDB successfully
-2025-12-08 18:57:12,582 - INFO - 🎯 Starting NeurDB Time-Series Execution Benchmark
-2025-12-08 18:57:12,582 - INFO - 🎲 QUICK TEST MODE: Loading and mixing all workloads...
-2025-12-08 18:57:12,650 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_popular_actor_drift.csv
-2025-12-08 18:57:12,715 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_movie_cast_drift.csv
-2025-12-08 18:57:12,776 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_role_search_drift.csv
-2025-12-08 18:57:12,837 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_multi_criteria_drift.csv
-2025-12-08 18:57:12,896 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_award_season_drift.csv
-2025-12-08 18:57:12,909 - INFO - 🔢 Mixed workload capped to 100 total queries
-2025-12-08 18:57:12,909 - INFO - 📊 Total mixed queries loaded: 100 from 5 scenarios
-2025-12-08 18:57:12,910 - INFO - 🎲 Executing mixed workload with 100 queries from multiple scenarios
-Executing mixed workload:   0%|          | 0/10 batchesExecuting mixed workload:  10%|█         | 1/10 batchesExecuting mixed workload:  20%|██        | 2/10 batchesExecuting mixed workload:  30%|███       | 3/10 batchesExecuting mixed workload:  40%|████      | 4/10 batchesExecuting mixed workload:  50%|█████     | 5/10 batchesExecuting mixed workload:  60%|██████    | 6/10 batchesExecuting mixed workload:  70%|███████   | 7/10 batchesExecuting mixed workload:  80%|████████  | 8/10 batchesExecuting mixed workload:  90%|█████████ | 9/10 batchesExecuting mixed workload: 100%|██████████| 10/10 batchesExecuting mixed workload: 100%|██████████| 10/10 batches
-2025-12-08 19:00:00,781 - INFO - ✅ Completed mixed workload: 100/100 queries successful
-2025-12-08 19:00:00,809 - INFO - 💾 Results saved to ./output/neurdb_benchmark/evaluation/time_series_execution_results.json
-2025-12-08 19:00:01,264 - INFO - 📊 Performance plots saved to ./output/neurdb_benchmark/evaluation/plots
-2025-12-08 19:00:01,264 - INFO - 🔌 Disconnected from database
-
-============================================================
-NEURDB TIME-SERIES EXECUTION COMPLETED
-============================================================
-
-📈 Mixed Execution:
-   Queries: 100/100 successful
-   Avg Time: 1.6686s
-   P95 Time: 4.4434s
-   Adaptation Points: 0
-
-💾 Results saved to: ./output/neurdb_benchmark/evaluation/
-============================================================
-✅ DriftBench workload completed successfully
-📊 Capturing final state (no auto-index)...
-
-✅ Phase 1 completed successfully!
-   Results saved to: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_185711/
-
-⏱️ Waiting 10 seconds between tests...
-
-==========================================
-PHASE 2: Benchmark WITH Auto-Index
-==========================================
-📊 Capturing initial state (auto-index enabled)...
-🔧 Enabling automatic index creation...
-🔧 Setting nr_enable_auto_index_creation = on
-✅ GUC parameter set to on (current: off)
-   ✅ AI Engine is accessible on port 8777
-   🤖 Auto-index creation is now ENABLED
-🔄 Restarting PostgreSQL to apply system GUC changes...
-Database connected, no restart needed for session-level setting
-📊 Capturing state after enabling auto-index...
-🚀 Running workload (with auto-index, 30s)...
-🚀 Starting DriftBench workload (auto mode, 30s)...
-📋 Directly invoking DriftBench test module...
-   PYTHONPATH: /Volumes/data/DB/DriftBench:/Volumes/data/DB/DriftBench:
-   DB Connection: neurdb@localhost:15432/imdb_ori
-   Results Dir: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_185711/driftbench_auto
-2025-12-08 19:00:12,822 - INFO - 🧪 Running in QUICK TEST MODE - Limited to 100 queries per scenario
-2025-12-08 19:00:12,861 - INFO - ✅ Connected to NeurDB successfully
-2025-12-08 19:00:12,861 - INFO - 🎯 Starting NeurDB Time-Series Execution Benchmark
-2025-12-08 19:00:12,861 - INFO - 🎲 QUICK TEST MODE: Loading and mixing all workloads...
-2025-12-08 19:00:12,928 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_popular_actor_drift.csv
-2025-12-08 19:00:12,992 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_movie_cast_drift.csv
-2025-12-08 19:00:13,053 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_role_search_drift.csv
-2025-12-08 19:00:13,114 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_multi_criteria_drift.csv
-2025-12-08 19:00:13,174 - INFO - 📊 Loaded 50000 queries from ./output/neurdb_benchmark/workloads/imdb_award_season_drift.csv
-2025-12-08 19:00:13,192 - INFO - 🔢 Mixed workload capped to 100 total queries
-2025-12-08 19:00:13,192 - INFO - 📊 Total mixed queries loaded: 100 from 5 scenarios
-2025-12-08 19:00:13,193 - INFO - 🎲 Executing mixed workload with 100 queries from multiple scenarios
-Executing mixed workload:   0%|          | 0/10 batchesExecuting mixed workload:  10%|█         | 1/10 batchesExecuting mixed workload:  20%|██        | 2/10 batchesExecuting mixed workload:  30%|███       | 3/10 batchesExecuting mixed workload:  40%|████      | 4/10 batchesExecuting mixed workload:  50%|█████     | 5/10 batchesExecuting mixed workload:  60%|██████    | 6/10 batchesExecuting mixed workload:  70%|███████   | 7/10 batchesExecuting mixed workload:  80%|████████  | 8/10 batchesExecuting mixed workload:  90%|█████████ | 9/10 batchesExecuting mixed workload: 100%|██████████| 10/10 batchesExecuting mixed workload: 100%|██████████| 10/10 batches
-2025-12-08 19:03:01,107 - INFO - ✅ Completed mixed workload: 100/100 queries successful
-2025-12-08 19:03:01,118 - INFO - 💾 Results saved to ./output/neurdb_benchmark/evaluation/time_series_execution_results.json
-2025-12-08 19:03:01,567 - INFO - 📊 Performance plots saved to ./output/neurdb_benchmark/evaluation/plots
-2025-12-08 19:03:01,567 - INFO - 🔌 Disconnected from database
-
-============================================================
-NEURDB TIME-SERIES EXECUTION COMPLETED
-============================================================
-
-📈 Mixed Execution:
-   Queries: 100/100 successful
-   Avg Time: 1.6690s
-   P95 Time: 4.4505s
-   Adaptation Points: 0
-
-💾 Results saved to: ./output/neurdb_benchmark/evaluation/
-============================================================
-✅ DriftBench workload completed successfully
-📊 Capturing final state (with auto-index)...
-
-✅ Phase 2 completed successfully!
-   Results saved to: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_185711/
-
-==========================================
-GENERATING COMPARISON REPORT
-==========================================
-📊 INDEX COMPARISON:
-   No Auto:   48 indexes, 3908.6875000000000000 MB
-   With Auto: 48 indexes, 3908.6875000000000000 MB
-   Difference:  new indexes, +0 MB (0%)
-   ⚠️  No new indexes created (workload may already be optimized)
-
-✅ BENCHMARK COMPLETE!
-==========================================
-Summary saved to: /Volumes/data/DB/neurdb_dev/output/neurdb_benchmark_20251208_185711/benchmark_summary.txt
-Comparison results shown above
-
-🧹 No temporary files to clean up (using direct DriftBench invocation)
-
-💡 To analyze detailed results:
-   - Check index_stats_*.json files for detailed index data
-   - Review driftbench_*.log files for query execution details
-   - Use the comparison script if you have both test results
-

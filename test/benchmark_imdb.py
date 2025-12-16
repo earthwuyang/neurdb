@@ -1,43 +1,75 @@
 #!/usr/bin/env python3
 """
-Benchmark script for NeurDB query optimizer.
-Compares two optimizer methods: default vs molqo
+Benchmark NeurDB index management with DriftBench.
+
+Runs DriftBench twice:
+1) Reactive interception ON, auto-index creation OFF
+2) Reactive interception ON, auto-index creation ON
+
+Reports average/median/P95 query latency for each run and prints a comparison.
 """
 
 import argparse
+import json
+import shutil
 import subprocess
 import time
-import random
-import csv
 import sys
-import statistics
 from datetime import datetime
-from typing import List, Tuple, Dict
 import os
+import re
+from dataclasses import dataclass
+from datetime import timezone
+
+import pandas as pd
+import psycopg2
 
 
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Benchmark NeurDB query optimizer against default and molqo methods"
+        description="Benchmark NeurDB index management with DriftBench (no-auto vs auto)"
     )
     parser.add_argument(
-        "--num_queries",
+        "--driftbench_path",
+        type=str,
+        default='/Volumes/data/DB/DriftBench',
+        help="Path to DriftBench repo (default: auto-detect)"
+    )
+    parser.add_argument(
+        "--query_num",
         type=int,
         default=100,
-        help="Number of queries to sample (default: 100)"
+        help="Total number of DriftBench queries to execute (default: 100)"
     )
     parser.add_argument(
-        "--query_file",
-        type=str,
-        default="/Volumes/data/DB/pg_mem_pred/query_generation/generated_workloads/imdb_ori/workload_100k_s1_group_order_by_more_complex.sql",
-        help="Path to SQL query file"
+        "--quick",
+        action="store_true",
+        help="Run DriftBench in quick mode (ignores --query_num)"
     )
     parser.add_argument(
-        "--output",
+        "--output_dir",
         type=str,
         default=None,
-        help="Output CSV file (default: benchmark_results_TIMESTAMP.csv)"
+        help="Output directory (default: output/driftbench_imdb_benchmark_TIMESTAMP)"
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for DriftBench mixed workload shuffle (default: 42)"
+    )
+    parser.add_argument(
+        "--pg_logfile",
+        type=str,
+        default=os.path.join("psql", "data", "logfile"),
+        help="Path to Postgres logfile for NRIM event extraction (default: psql/data/logfile)"
+    )
+    parser.add_argument(
+        "--nrim_debug",
+        action="store_true",
+        default=True,
+        help="Enable nr_reactive.debug during DriftBench execution (more NRIM logs, more overhead)"
     )
     parser.add_argument(
         "--host",
@@ -60,266 +92,535 @@ def parse_args():
     parser.add_argument(
         "--database",
         type=str,
-        default="imdb_ori",
+        default="imdb_test",
         help="PostgreSQL database"
     )
     parser.add_argument(
-        "--molqo_url",
+        "--password",
         type=str,
-        default="http://localhost:8666/optimize",
-        help="MoLQO server URL"
+        default="",
+        help="PostgreSQL password (default: empty)"
     )
     parser.add_argument(
         "--timeout",
         type=int,
-        default=30,
-        help="Query timeout in seconds (default: 300)"
+        default=0,
+        help="psql statement timeout in seconds (0 means no timeout)"
+    )
+    parser.add_argument(
+        "--no_reset_nrim",
+        action="store_false",
+        dest="reset_nrim",
+        default=True,
+        help="Do not reset NRIM bookkeeping tables (default: reset)"
     )
     return parser.parse_args()
 
 
-def read_queries(query_file: str) -> List[str]:
-    """Read queries from SQL file."""
-    try:
-        with open(query_file, 'r') as f:
-            queries = [line.strip() for line in f if line.strip()]
-        print(f"Loaded {len(queries)} queries from {query_file}")
-        return queries
-    except FileNotFoundError:
-        print(f"Error: Query file not found: {query_file}", file=sys.stderr)
-        sys.exit(1)
-    except Exception as e:
-        print(f"Error reading query file: {e}", file=sys.stderr)
-        sys.exit(1)
+def detect_driftbench_path() -> str:
+    candidates = [
+        "/Volumes/data/DB/DriftBench",
+        "/code/neurdb-dev",
+    ]
+    for p in candidates:
+        if os.path.isfile(os.path.join(p, "test", "test_neurdb_time_series_execution.py")):
+            return p
+    raise FileNotFoundError(
+        "Could not find DriftBench. Pass --driftbench_path pointing to a repo containing "
+        "test/test_neurdb_time_series_execution.py"
+    )
 
 
-def sample_queries(queries: List[str], num_queries: int) -> List[str]:
-    """Randomly sample queries."""
-    if num_queries > len(queries):
-        print(f"Warning: Requested {num_queries} queries but only {len(queries)} available")
-        num_queries = len(queries)
-
-    sampled = random.sample(queries, num_queries)
-    print(f"Sampled {num_queries} queries")
-    return sampled
-
-
-def execute_query_psql(query: str, optimizer_settings: List[str], args) -> Tuple[float, bool, str]:
-    """
-    Execute a single query using psql with given optimizer settings.
-
-    Returns:
-        - execution_time: float (seconds)
-        - success: bool
-        - error_msg: str (empty if success)
-    """
-    # Build psql command
-    psql_cmd = [
+def run_psql(args, sql: str) -> None:
+    env = {**os.environ, "PGPASSWORD": args.password}
+    cmd = [
         "psql",
-        f"-h", args.host,
-        f"-p", str(args.port),
-        f"-U", args.user,
-        f"-d", args.database,
-        f"--tuples-only",
-        f"--quiet",
-        f"--command", f"\\timing on"
+        "-h",
+        args.host,
+        "-p",
+        str(args.port),
+        "-U",
+        args.user,
+        "-d",
+        args.database,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-q",
+        "-c",
+        sql,
+    ]
+    if args.timeout and args.timeout > 0:
+        # Apply per-session statement_timeout in seconds.
+        cmd[-1] = f"SET statement_timeout = {int(args.timeout) * 1000}; {sql}"
+    subprocess.run(cmd, check=True, text=True, capture_output=True, env=env)
+
+
+def fetch_psql_lines(args, sql: str) -> list[str]:
+    env = {**os.environ, "PGPASSWORD": args.password}
+    cmd = [
+        "psql",
+        "-h",
+        args.host,
+        "-p",
+        str(args.port),
+        "-U",
+        args.user,
+        "-d",
+        args.database,
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-A",
+        "-t",
+        "-q",
+        "-c",
+        sql,
+    ]
+    res = subprocess.run(cmd, check=True, text=True, capture_output=True, env=env)
+    lines = [ln.strip() for ln in res.stdout.splitlines() if ln.strip()]
+    return lines
+
+
+def drop_reactive_indexes(args) -> None:
+    idx_rows = fetch_psql_lines(
+        args,
+        "SELECT schemaname || '.' || indexname "
+        "FROM pg_indexes "
+        "WHERE indexname LIKE 'idx_reactive\\_%' ESCAPE '\\' "
+        "ORDER BY 1",
+    )
+    if not idx_rows:
+        print("No idx_reactive_* indexes found to drop.")
+        return
+
+    print(f"Dropping {len(idx_rows)} idx_reactive_* indexes (CONCURRENTLY)...")
+    for ident in idx_rows:
+        run_psql(args, f"DROP INDEX CONCURRENTLY IF EXISTS {ident};")
+
+
+def reset_nrim_tables(args) -> None:
+    # Best-effort: tables exist only if extension is installed/updated.
+    try:
+        run_psql(
+            args,
+            "TRUNCATE nrim.nrim_work_queue, "
+            "nrim.nrim_query_index_attribution, "
+            "nrim.nrim_index_registry, "
+            "nrim.nrim_query_facts "
+            "RESTART IDENTITY;",
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"Warning: could not reset NRIM tables (skipping): {e}", file=sys.stderr)
+
+
+def configure_mode(args, *, auto_create: bool) -> None:
+    # Persisted settings so the background worker sees them.
+    run_psql(args, f"ALTER DATABASE {args.database} SET nr_index_management_strategy = 'reactive';")
+    run_psql(args, f"ALTER DATABASE {args.database} SET nr_reactive.enable = on;")
+    run_psql(args, f"ALTER DATABASE {args.database} SET nr_enable_auto_index_creation = {'on' if auto_create else 'off'};")
+    run_psql(args, f"ALTER DATABASE {args.database} SET nr_reactive.use_concurrently = on;")
+    run_psql(args, f"ALTER DATABASE {args.database} SET nr_reactive.debug = {'on' if args.nrim_debug else 'off'};")
+    run_psql(args, "SELECT pg_reload_conf();")
+    time.sleep(1.0)
+
+
+def write_driftbench_pg_info(driftbench_path: str, args) -> tuple[str, str]:
+    pg_info_path = os.path.join(driftbench_path, "data", "PG_info.json")
+    with open(pg_info_path, "r", encoding="utf-8") as f:
+        original = f.read()
+
+    updated = {
+        "dbname": args.database,
+        "user": args.user,
+        "password": args.password,
+        "host": args.host,
+        "port": int(args.port),
+    }
+    tmp_path = None
+    try:
+        with open(pg_info_path, "w", encoding="utf-8") as f:
+            json.dump(updated, f, indent=4)
+            f.write("\n")
+        tmp_path = pg_info_path
+    except Exception:
+        # Restore on failure.
+        with open(pg_info_path, "w", encoding="utf-8") as f:
+            f.write(original)
+        raise
+
+    return tmp_path, original
+
+
+def run_driftbench(driftbench_path: str, *, quick: bool, query_num: int, log_path: str) -> None:
+    # Remove previous results so we don't accidentally parse stale data.
+    results_path = os.path.join(
+        driftbench_path,
+        "output",
+        "neurdb_benchmark",
+        "evaluation",
+        "time_series_execution_results.json",
+    )
+    try:
+        os.remove(results_path)
+    except FileNotFoundError:
+        pass
+
+    cmd = [sys.executable, "-m", "test.test_neurdb_time_series_execution"]
+    if quick:
+        cmd.append("--quick")
+    else:
+        cmd.extend(["--query-num", str(query_num)])
+
+    with open(log_path, "w", encoding="utf-8") as logf:
+        res = subprocess.run(
+            cmd,
+            cwd=driftbench_path,
+            check=False,
+            text=True,
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            env={**os.environ, "PYTHONPATH": f"{driftbench_path}{os.pathsep}{os.environ.get('PYTHONPATH','')}"},
+        )
+    if res.returncode != 0:
+        print(f"Warning: DriftBench exited with code {res.returncode}; logs at {log_path}", file=sys.stderr)
+
+
+def load_driftbench_metrics(driftbench_path: str) -> dict:
+    results_path = os.path.join(
+        driftbench_path,
+        "output",
+        "neurdb_benchmark",
+        "evaluation",
+        "time_series_execution_results.json",
+    )
+    if not os.path.isfile(results_path):
+        raise FileNotFoundError(f"DriftBench results not found at {results_path}")
+    with open(results_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    mixed = data.get("mixed_execution") or {}
+    return {
+        "avg_s": float(mixed.get("avg_execution_time", 0.0)),
+        "median_s": float(mixed.get("median_execution_time", 0.0)),
+        "p95_s": float(mixed.get("p95_execution_time", 0.0)),
+        "successful_queries": int(mixed.get("successful_queries", 0)),
+        "total_queries": int(mixed.get("total_queries", 0)),
+        "failed_queries": int(mixed.get("failed_queries", 0)),
+    }
+
+
+def snapshot_driftbench_outputs(driftbench_path: str, out_dir: str, prefix: str) -> None:
+    src_eval_dir = os.path.join(driftbench_path, "output", "neurdb_benchmark", "evaluation")
+    if not os.path.isdir(src_eval_dir):
+        return
+    dst_eval_dir = os.path.join(out_dir, f"{prefix}_driftbench_evaluation")
+    if os.path.exists(dst_eval_dir):
+        shutil.rmtree(dst_eval_dir)
+    shutil.copytree(src_eval_dir, dst_eval_dir)
+
+
+def load_mixed_workload(driftbench_path: str, *, max_queries: int, seed: int) -> pd.DataFrame:
+    workload_dir = os.path.join(driftbench_path, "output", "neurdb_benchmark", "workloads")
+    scenarios = [
+        ("imdb_popular_actor_drift.csv", "popular_actor"),
+        ("imdb_movie_cast_drift.csv", "movie_cast"),
+        ("imdb_role_search_drift.csv", "role_search"),
+        ("imdb_multi_criteria_drift.csv", "multi_criteria"),
+        ("imdb_award_season_drift.csv", "award_season"),
     ]
 
-    # Build the full command with settings and query
-    settings_sql = "; ".join(optimizer_settings) + "; "
-    full_query = settings_sql + query
+    dfs = []
+    for fn, scenario in scenarios:
+        path = os.path.join(workload_dir, fn)
+        if not os.path.isfile(path):
+            raise FileNotFoundError(f"DriftBench workload not found: {path}")
+        df = pd.read_csv(path)
+        if "query" not in df.columns:
+            raise ValueError(f"Workload file missing 'query' column: {path}")
+        df = df.copy()
+        df["scenario"] = scenario
+        dfs.append(df)
 
+    mixed = pd.concat(dfs, ignore_index=True)
+    mixed = mixed.sample(frac=1, random_state=seed).reset_index(drop=True)
+    if max_queries and len(mixed) > max_queries:
+        mixed = mixed.head(max_queries)
+    return mixed
+
+
+@dataclass
+class QueryResult:
+    query_idx: int
+    scenario: str
+    start_ts_utc: str
+    end_ts_utc: str
+    duration_s: float
+    success: bool
+    error: str
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def run_workload_with_psycopg2(args, workload_df: pd.DataFrame, out_csv: str, *, application_name: str) -> dict:
+    conn = psycopg2.connect(
+        dbname=args.database,
+        user=args.user,
+        password=args.password,
+        host=args.host,
+        port=args.port,
+        application_name=application_name,
+    )
+    conn.autocommit = False
+    results: list[QueryResult] = []
+
+    start_run = utc_now_iso()
     try:
-        start_time = time.time()
-        result = subprocess.run(
-            psql_cmd + ["--command", full_query],
-            capture_output=True,
-            text=True,
-            timeout=args.timeout,
-            env={**os.environ, "PGPASSWORD": ""}  # Add password if needed
-        )
-        end_time = time.time()
+        with conn.cursor() as cur:
+            cur.execute("SET client_min_messages = warning;")
+            cur.execute("SET statement_timeout = %s;", (int(args.timeout) * 1000,))
+        conn.commit()
 
-        execution_time = end_time - start_time
+        for i, row in enumerate(workload_df.itertuples(index=False), 1):
+            q = getattr(row, "query")
+            scenario = getattr(row, "scenario")
+            start_ts = utc_now_iso()
+            t0 = time.perf_counter()
+            ok = True
+            err = ""
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(q)
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                ok = False
+                err = str(e).replace("\n", " ").strip()
+            t1 = time.perf_counter()
+            end_ts = utc_now_iso()
+            results.append(
+                QueryResult(
+                    query_idx=i,
+                    scenario=scenario,
+                    start_ts_utc=start_ts,
+                    end_ts_utc=end_ts,
+                    duration_s=float(t1 - t0),
+                    success=ok,
+                    error=err,
+                )
+            )
+    finally:
+        conn.close()
 
-        if result.returncode == 0:
-            return execution_time, True, ""
-        else:
-            error_msg = result.stderr.strip() if result.stderr else result.stdout.strip()
-            return execution_time, False, error_msg
+    end_run = utc_now_iso()
+    df = pd.DataFrame([r.__dict__ for r in results])
+    df.to_csv(out_csv, index=False)
 
-    except subprocess.TimeoutExpired:
-        return args.timeout, False, f"Query timed out after {args.timeout} seconds"
-    except Exception as e:
-        return 0.0, False, str(e)
-
-
-def run_benchmark(queries: List[str], args) -> List[Dict]:
-    """Run benchmark for all queries with both optimizer methods."""
-    results = []
-
-    print(f"\nStarting benchmark with {len(queries)} queries")
-    print("=" * 80)
-
-    for idx, query in enumerate(queries, 1):
-        print(f"\nQuery {idx}/{len(queries)}:")
-        print(f"{'='*80}")
-
-        # Test with default optimizer
-        print("Testing DEFAULT optimizer...")
-        default_settings = [
-            "set enable_molqo=off"
-        ]
-        default_time, default_success, default_error = execute_query_psql(
-            query, default_settings, args
-        )
-
-        if default_success:
-            print(f"  ✓ Success: {default_time:.4f} seconds")
-        else:
-            print(f"  ✗ Failed: {default_error}")
-
-        # Test with molqo optimizer
-        print("Testing MOLQO optimizer...")
-        molqo_settings = [
-            "set enable_molqo=on",
-            f"set molqo.server_url = '{args.molqo_url}'"
-        ]
-        molqo_time, molqo_success, molqo_error = execute_query_psql(
-            query, molqo_settings, args
-        )
-
-        if molqo_success:
-            print(f"  ✓ Success: {molqo_time:.4f} seconds")
-        else:
-            print(f"  ✗ Failed: {molqo_error}")
-
-        # Calculate speedup
-        if default_success and molqo_success and default_time > 0:
-            speedup = default_time / molqo_time
-            improvement = ((default_time - molqo_time) / default_time) * 100
-        else:
-            speedup = None
-            improvement = None
-
-        # Store results
-        result = {
-            'query_id': idx,
-            'query': query[:200] + "..." if len(query) > 200 else query,
-            'default_time': default_time if default_success else None,
-            'default_success': default_success,
-            'default_error': default_error if not default_success else "",
-            'molqo_time': molqo_time if molqo_success else None,
-            'molqo_success': molqo_success,
-            'molqo_error': molqo_error if not molqo_success else "",
-            'speedup': speedup,
-            'improvement_pct': improvement
-        }
-        results.append(result)
-
-    return results
+    ok_df = df[df["success"] == True]
+    lat = ok_df["duration_s"].tolist()
+    metrics = {
+        "run_start_utc": start_run,
+        "run_end_utc": end_run,
+        "total_queries": int(len(df)),
+        "successful_queries": int(ok_df.shape[0]),
+        "failed_queries": int((df["success"] == False).sum()),
+        "avg_s": float(ok_df["duration_s"].mean()) if not ok_df.empty else 0.0,
+        "median_s": float(ok_df["duration_s"].median()) if not ok_df.empty else 0.0,
+        "p95_s": float(ok_df["duration_s"].quantile(0.95)) if not ok_df.empty else 0.0,
+        "p99_s": float(ok_df["duration_s"].quantile(0.99)) if not ok_df.empty else 0.0,
+        "min_s": float(ok_df["duration_s"].min()) if not ok_df.empty else 0.0,
+        "max_s": float(ok_df["duration_s"].max()) if not ok_df.empty else 0.0,
+    }
+    if lat:
+        metrics["std_s"] = float(ok_df["duration_s"].std(ddof=0))
+    else:
+        metrics["std_s"] = 0.0
+    return metrics
 
 
-def print_summary(results: List[Dict]):
-    """Print benchmark summary statistics."""
-    print("\n" + "=" * 80)
-    print("BENCHMARK SUMMARY")
-    print("=" * 80)
-
-    successful_defaults = [r for r in results if r['default_success']]
-    successful_molqo = [r for r in results if r['molqo_success']]
-    successful_both = [r for r in results if r['default_success'] and r['molqo_success']]
-
-    print(f"\nTotal queries: {len(results)}")
-    print(f"Default optimizer successful: {len(successful_defaults)}")
-    print(f"MoLQO optimizer successful: {len(successful_molqo)}")
-    print(f"Both successful (comparable): {len(successful_both)}")
-
-    if successful_both:
-        default_times = [r['default_time'] for r in successful_both]
-        molqo_times = [r['molqo_time'] for r in successful_both]
-        speedups = [r['speedup'] for r in successful_both if r['speedup'] is not None]
-        improvements = [r['improvement_pct'] for r in successful_both if r['improvement_pct'] is not None]
-
-        print(f"\nPerformance comparison (on successful queries):")
-        print(f"  Default optimizer:")
-        print(f"    Makespan (total time): {sum(default_times):.4f}s")
-        print(f"    Avg latency: {sum(default_times)/len(default_times):.4f}s")
-        print(f"    P95 latency: {statistics.quantiles(default_times, n=100)[94]:.4f}s")
-        print(f"    Min time: {min(default_times):.4f}s")
-        print(f"    Max time: {max(default_times):.4f}s")
-
-        print(f"  MoLQO optimizer:")
-        print(f"    Makespan (total time): {sum(molqo_times):.4f}s")
-        print(f"    Avg latency: {sum(molqo_times)/len(molqo_times):.4f}s")
-        print(f"    P95 latency: {statistics.quantiles(molqo_times, n=100)[94]:.4f}s")
-        print(f"    Min time: {min(molqo_times):.4f}s")
-        print(f"    Max time: {max(molqo_times):.4f}s")
-
-        if speedups:
-            avg_speedup = sum(speedups) / len(speedups)
-            avg_improvement = sum(improvements) / len(improvements)
-            print(f"\n  Speedup:")
-            print(f"    Average speedup: {avg_speedup:.2f}x")
-            print(f"    Average improvement: {avg_improvement:.2f}%")
-            print(f"    Min speedup: {min(speedups):.2f}x")
-            print(f"    Max speedup: {max(speedups):.2f}x")
-
-            # Count improvements vs regressions
-            improvements_count = sum(1 for i in improvements if i > 0)
-            regressions_count = sum(1 for i in improvements if i < 0)
-            neutral_count = sum(1 for i in improvements if i == 0)
-
-            print(f"\n  Query performance distribution:")
-            print(f"    Improved: {improvements_count} ({improvements_count/len(improvements)*100:.1f}%)")
-            print(f"    Regressed: {regressions_count} ({regressions_count/len(improvements)*100:.1f}%)")
-            print(f"    Neutral: {neutral_count} ({neutral_count/len(improvements)*100:.1f}%)")
+def parse_pg_log_ts(line: str) -> datetime | None:
+    m = re.match(r"^(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}\\.\\d{3}) ([A-Z]+) ", line)
+    if not m:
+        return None
+    ts_s = m.group(1)
+    tz = m.group(2)
+    if tz != "UTC" and tz != "GMT":
+        return None
+    # Example: 2025-12-14 07:25:23.710 UTC
+    return datetime.strptime(ts_s, "%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=timezone.utc)
 
 
-def save_results(results: List[Dict], output_file: str):
-    """Save results to CSV file."""
-    try:
-        with open(output_file, 'w', newline='') as csvfile:
-            if not results:
-                print("No results to save")
-                return
+def extract_nrim_events(pg_logfile: str, start_utc: str, end_utc: str, out_csv: str) -> None:
+    if not os.path.isfile(pg_logfile):
+        return
+    start_dt = datetime.fromisoformat(start_utc.replace("Z", "+00:00"))
+    end_dt = datetime.fromisoformat(end_utc.replace("Z", "+00:00"))
 
-            fieldnames = results[0].keys()
-            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+    patterns = [
+        "NRIM v2 worker: attempting CREATE INDEX",
+        "NRIM v2 worker: CREATE INDEX succeeded",
+        "NRIM v2 worker: eviction dropping",
+        "NRIM v2 worker: eviction DROP INDEX succeeded",
+        "NRIM v2 worker: eviction DROP INDEX failed",
+        "NRIM v2 worker: post-create budget exceeded",
+    ]
 
-            writer.writeheader()
-            for result in results:
-                writer.writerow(result)
+    events = []
+    with open(pg_logfile, "r", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            ts = parse_pg_log_ts(line)
+            if ts is None:
+                continue
+            if ts < start_dt or ts > end_dt:
+                continue
+            if any(p in line for p in patterns):
+                events.append(
+                    {
+                        "ts_utc": ts.isoformat(),
+                        "line": line.strip(),
+                    }
+                )
 
-        print(f"\nResults saved to: {output_file}")
-    except Exception as e:
-        print(f"Error saving results: {e}", file=sys.stderr)
+    if not events:
+        return
+    pd.DataFrame(events).to_csv(out_csv, index=False)
+
+
+def compare_query_runs(noauto_csv: str, auto_csv: str, out_csv: str) -> pd.DataFrame:
+    a = pd.read_csv(noauto_csv)
+    b = pd.read_csv(auto_csv)
+    merged = a.merge(b, on=["query_idx", "scenario"], suffixes=("_noauto", "_auto"))
+    merged["delta_s"] = merged["duration_s_auto"] - merged["duration_s_noauto"]
+    merged["ratio_auto_over_noauto"] = merged["duration_s_auto"] / merged["duration_s_noauto"].replace(0, pd.NA)
+    merged.to_csv(out_csv, index=False)
+    return merged
 
 
 def main():
     """Main benchmark function."""
     args = parse_args()
 
-    # Set output filename if not specified
-    if args.output is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        args.output = f"benchmark_results_{timestamp}.csv"
+    if args.driftbench_path is None:
+        args.driftbench_path = detect_driftbench_path()
 
-    # Read queries
-    print("Reading queries...")
-    all_queries = read_queries(args.query_file)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    if args.output_dir is None:
+        args.output_dir = os.path.join("output", f"driftbench_imdb_benchmark_{timestamp}")
+    os.makedirs(args.output_dir, exist_ok=True)
 
-    # Sample queries
-    sampled_queries = sample_queries(all_queries, args.num_queries)
+    driftbench_path = args.driftbench_path
+    print(f"Using DriftBench at: {driftbench_path}")
+    print(f"Output dir: {args.output_dir}")
 
-    # Run benchmark
-    results = run_benchmark(sampled_queries, args)
+    # Ensure DriftBench connects to the correct DB by updating DriftBench's PG_info.json.
+    pg_info_path, pg_info_original = write_driftbench_pg_info(driftbench_path, args)
+    try:
+        workload_df = load_mixed_workload(
+            driftbench_path,
+            max_queries=(100 if args.quick else args.query_num),
+            seed=args.seed,
+        )
+        workload_path = os.path.join(args.output_dir, "mixed_workload.csv")
+        workload_df.to_csv(workload_path, index=False)
 
-    # Print summary
-    print_summary(results)
+        # Clean slate before baseline run.
+        drop_reactive_indexes(args)
+        if args.reset_nrim:
+            reset_nrim_tables(args)
 
-    # Save results
-    save_results(results, args.output)
+        # Phase 1: reactive enabled, auto-create disabled.
+        print("\n=== Phase 1: reactive ON, auto-create OFF ===")
+        configure_mode(args, auto_create=False)
+        noauto_csv = os.path.join(args.output_dir, "noauto_queries.csv")
+        metrics_noauto = run_workload_with_psycopg2(
+            args,
+            workload_df,
+            noauto_csv,
+            application_name="driftbench_noauto_client",
+        )
+        extract_nrim_events(
+            args.pg_logfile,
+            metrics_noauto["run_start_utc"],
+            metrics_noauto["run_end_utc"],
+            os.path.join(args.output_dir, "noauto_nrim_events.csv"),
+        )
+
+        # Clean slate before auto run (reactive indexes from phase 1 should not exist, but ensure anyway).
+        drop_reactive_indexes(args)
+        if args.reset_nrim:
+            reset_nrim_tables(args)
+
+        # Phase 2: reactive enabled, auto-create enabled.
+        print("\n=== Phase 2: reactive ON, auto-create ON ===")
+        configure_mode(args, auto_create=True)
+        auto_csv = os.path.join(args.output_dir, "auto_queries.csv")
+        metrics_auto = run_workload_with_psycopg2(
+            args,
+            workload_df,
+            auto_csv,
+            application_name="driftbench_auto_client",
+        )
+        extract_nrim_events(
+            args.pg_logfile,
+            metrics_auto["run_start_utc"],
+            metrics_auto["run_end_utc"],
+            os.path.join(args.output_dir, "auto_nrim_events.csv"),
+        )
+
+    finally:
+        # Restore DriftBench config file.
+        if pg_info_path:
+            with open(pg_info_path, "w", encoding="utf-8") as f:
+                f.write(pg_info_original)
+
+    # Print summary + save comparison.
+    print("\n" + "=" * 72)
+    print("DRIFTBENCH SUMMARY (IMDb)")
+    print("=" * 72)
+    print(f"Mode: no-auto  avg={metrics_noauto['avg_s']:.4f}s  median={metrics_noauto['median_s']:.4f}s  p95={metrics_noauto['p95_s']:.4f}s  ok={metrics_noauto['successful_queries']}/{metrics_noauto['total_queries']}")
+    print(f"Mode: auto     avg={metrics_auto['avg_s']:.4f}s  median={metrics_auto['median_s']:.4f}s  p95={metrics_auto['p95_s']:.4f}s  ok={metrics_auto['successful_queries']}/{metrics_auto['total_queries']}")
+
+    def ratio(a: float, b: float) -> float:
+        return (a / b) if b > 0 else float("inf")
+
+    print("\nSpeedup (no-auto / auto):")
+    print(f"  avg:    {ratio(metrics_noauto['avg_s'], metrics_auto['avg_s']):.3f}x")
+    print(f"  median: {ratio(metrics_noauto['median_s'], metrics_auto['median_s']):.3f}x")
+    print(f"  p95:    {ratio(metrics_noauto['p95_s'], metrics_auto['p95_s']):.3f}x")
+
+    out_json = os.path.join(args.output_dir, "comparison.json")
+    with open(out_json, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "database": args.database,
+                "query_num": None if args.quick else args.query_num,
+                "quick": bool(args.quick),
+                "seed": args.seed,
+                "noauto": metrics_noauto,
+                "auto": metrics_auto,
+            },
+            f,
+            indent=2,
+        )
+        f.write("\n")
+    print(f"\nSaved: {out_json}")
+
+    # Per-query comparison report (regressions/improvements).
+    comparison_csv = os.path.join(args.output_dir, "per_query_comparison.csv")
+    merged = compare_query_runs(
+        os.path.join(args.output_dir, "noauto_queries.csv"),
+        os.path.join(args.output_dir, "auto_queries.csv"),
+        comparison_csv,
+    )
+    print(f"Saved: {comparison_csv}")
+
+    ok = merged[(merged["success_noauto"] == True) & (merged["success_auto"] == True)]
+    if not ok.empty:
+        top_reg = ok.sort_values("delta_s", ascending=False).head(20)
+        top_imp = ok.sort_values("delta_s", ascending=True).head(20)
+        top_reg.to_csv(os.path.join(args.output_dir, "top_regressions.csv"), index=False)
+        top_imp.to_csv(os.path.join(args.output_dir, "top_improvements.csv"), index=False)
+        print(f"Saved: {os.path.join(args.output_dir, 'top_regressions.csv')}")
+        print(f"Saved: {os.path.join(args.output_dir, 'top_improvements.csv')}")
 
 
 if __name__ == "__main__":

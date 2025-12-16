@@ -1,6 +1,8 @@
 # NeurDB repository ignore files
 *.log
 
+output/
+
 Miniconda3-latest-Linux-aarch64.sh
 
 aiengine/workload_forecast/test_models/
