@@ -8,6 +8,8 @@ import json
 import logging
 import os
 import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 import numpy as np
@@ -24,7 +26,6 @@ try:
     from index_advisor import IndexCandidate, QueryAnalysis
     from index_recommendation_engine import RecommendationConfig, RecommendationStrategy
     from predictive_index_manager import PredictiveIndexManager, PredictiveConfig
-    from reactive_index_manager import ReactiveIndexManager, ReactiveConfig, EvictionPolicy
 except ImportError as e:
     print(f"Error importing modules: {e}")
     print("Make sure all Phase 2, Phase 3, and Phase 4 modules are in the src/ directory")
@@ -123,6 +124,158 @@ def load_workload_data(log_file_path):
     return workload_data
 
 
+_forecasting_lock = threading.Lock()
+_retrain_stop_event = threading.Event()
+
+
+def build_forecasting_config(database_config=None):
+    """Create ForecastingPipeline config; database_config can be None to disable DB-backed training data."""
+    return {
+        'models_dir': 'models/forecasting',
+        'retrain_interval_hours': 24,
+        'min_training_samples': 50,
+        'validation_split': 0.2,
+        'enable_auto_retraining': True,
+        'database': database_config,
+        'model_configs': {
+            'ar': {
+                'max_order': 8,
+                'auto_order': True,
+                'seasonal': True
+            },
+            'rnn': {
+                'hidden_size': 64,
+                'num_layers': 2,
+                'sequence_length': 24,
+                'epochs': 50,
+                'batch_size': 16
+            },
+            'spectral': {
+                'n_harmonics': 15,
+                'frequency_threshold': 0.05,
+                'detrend_method': 'linear'
+            },
+            'ensemble': {
+                'models': ['ar', 'rnn', 'spectral'],
+                'weight_optimization': 'performance',
+                'performance_window': 20
+            }
+        }
+    }
+
+
+def ensure_forecasting_pipeline_initialized():
+    """Ensure global forecasting_pipeline is initialized (prefer DB-enabled, fall back to DB-disabled)."""
+    global forecasting_pipeline
+
+    if forecasting_pipeline is not None:
+        return
+
+    # Prefer DB-backed pipeline (for future use), but tolerate missing metrics DB by falling back.
+    db_cfg = {
+        'host': 'localhost',
+        'port': 15432,
+        'database': 'neurdb_metrics',
+        'user': 'neurdb',
+        'password': ''
+    }
+
+    with _forecasting_lock:
+        if forecasting_pipeline is not None:
+            return
+        try:
+            forecasting_pipeline = ForecastingPipeline(build_forecasting_config(database_config=db_cfg))
+            logger.info("Initialized ForecastingPipeline (DB-enabled)")
+        except Exception as e:
+            logger.warning(f"Failed to initialize ForecastingPipeline (DB-enabled): {e}; retrying with DB disabled")
+            try:
+                forecasting_pipeline = ForecastingPipeline(build_forecasting_config(database_config=None))
+                logger.info("Initialized ForecastingPipeline (DB disabled)")
+            except Exception as e2:
+                logger.warning(f"Failed to initialize ForecastingPipeline (DB disabled): {e2}")
+                forecasting_pipeline = None
+
+
+def _parse_model_types(value):
+    if value is None:
+        return ['ar']
+    if isinstance(value, list):
+        return [str(v).strip().lower() for v in value if str(v).strip()]
+    return [s.strip().lower() for s in str(value).split(',') if s.strip()]
+
+
+def start_periodic_retrainer():
+    """
+    Periodically retrain forecasting models from the workload CSV log.
+
+    This is a pragmatic cold-start mitigator: keep models on disk fresh so
+    `/analyze_workload` can forecast without per-request training.
+    """
+    interval_minutes = int(os.environ.get('NEURDB_FORECAST_RETRAIN_INTERVAL_MINUTES', '60'))
+    max_templates = int(os.environ.get('NEURDB_FORECAST_RETRAIN_MAX_TEMPLATES', '50'))
+    model_types = _parse_model_types(os.environ.get('NEURDB_FORECAST_RETRAIN_MODELS', 'ar'))
+
+    def _loop():
+        last_fingerprint = None
+        logger.info(f"Periodic retrain enabled: every {interval_minutes} min, models={model_types}, max_templates={max_templates}")
+        while not _retrain_stop_event.is_set():
+            try:
+                log_file = app.config.get('LOG_FILE')
+                if not log_file:
+                    time.sleep(5)
+                    continue
+
+                try:
+                    st = os.stat(log_file)
+                    fingerprint = (st.st_mtime_ns, st.st_size)
+                except FileNotFoundError:
+                    fingerprint = None
+
+                # Only retrain if file changed
+                if fingerprint and fingerprint != last_fingerprint:
+                    ensure_forecasting_pipeline_initialized()
+                    if forecasting_pipeline is None:
+                        logger.warning("Periodic retrain skipped: forecasting_pipeline unavailable")
+                    else:
+                        templatizer_local = AdvancedTemplatizer()
+                        query_data, ts_map = load_workload_from_csv(log_file, templatizer_local)
+                        stats = templatizer_local.compute_template_statistics(ts_map)
+                        top_keys = sorted(stats.keys(),
+                                          key=lambda k: stats[k].get('total_queries', 0),
+                                          reverse=True)[:max_templates]
+
+                        trained = 0
+                        with _forecasting_lock:
+                            for key in top_keys:
+                                series = ts_map.get(key)
+                                if not series:
+                                    continue
+                                series_list = _sorted_dict_to_series(series)
+                                for mt in model_types:
+                                    try:
+                                        temp_forecaster = forecasting_pipeline.create_forecaster(mt)
+                                        min_required = temp_forecaster.get_min_required_samples()
+                                        if len(series_list) < min_required:
+                                            continue
+                                        forecasting_pipeline.train_model(mt, series_list, key, save_model=True)
+                                        trained += 1
+                                    except Exception as e:
+                                        logger.debug(f"Periodic retrain failed for {key} ({mt}): {e}")
+
+                        logger.info(f"Periodic retrain complete: trained={trained} models from {len(top_keys)} templates")
+
+                    last_fingerprint = fingerprint
+
+            except Exception as e:
+                logger.warning(f"Periodic retrain loop error: {e}")
+
+            _retrain_stop_event.wait(timeout=max(10, interval_minutes * 60))
+
+    t = threading.Thread(target=_loop, name="neurdb-forecast-retrainer", daemon=True)
+    t.start()
+    return t
+
+
 def analyze_workload_template(workload_data):
     """Analyze workload and extract statistics"""
     if not workload_data:
@@ -161,25 +314,242 @@ def analyze_workload_template(workload_data):
 
 
 def forecast_workload(workload_data, horizon_minutes):
-    """Forecast future workload (placeholder implementation)"""
+    """Deprecated placeholder (kept for backward compatibility)."""
     if not workload_data:
         return {
             'predicted_queries': 0,
             'forecast_interval_minutes': horizon_minutes,
-            'confidence': 0.0
+            'confidence': 0.0,
+            'model': 'none'
         }
 
-    # Simple forecasting: average recent activity
     recent_queries = len(workload_data)
-    avg_per_hour = recent_queries / 24  # Assume 24 hours of data
-
+    avg_per_hour = recent_queries / 24
     predicted_queries = int(avg_per_hour * (horizon_minutes / 60))
-    confidence = 0.5  # Placeholder confidence
-
     return {
         'predicted_queries': predicted_queries,
         'forecast_interval_minutes': horizon_minutes,
-        'confidence': confidence
+        'confidence': 0.5,
+        'model': 'placeholder_avg_rate'
+    }
+
+
+def _infer_interval_minutes(ts_dict):
+    """Infer bucket size in minutes from a SortedDict[datetime->count]."""
+    try:
+        keys = list(ts_dict.keys())
+        if len(keys) < 2:
+            return 1
+        delta = keys[1] - keys[0]
+        minutes = int(round(delta.total_seconds() / 60.0))
+        return minutes if minutes > 0 else 1
+    except Exception:
+        return 1
+
+
+def _sorted_dict_to_series(ts_dict):
+    """Convert SortedDict[datetime->count] to List[(datetime, float)]."""
+    return [(ts, float(v)) for ts, v in ts_dict.items()]
+
+
+def _naive_forecast_points(last_ts, last_val, horizon_steps, interval_minutes):
+    """Produce a naive forecast by repeating last observed value."""
+    points = []
+    for i in range(1, horizon_steps + 1):
+        ts = last_ts + timedelta(minutes=interval_minutes * i)
+        points.append((ts, float(last_val)))
+    return points
+
+
+def _jsonify_forecast_points(points):
+    return [{'ts': ts.isoformat(), 'value': float(v)} for ts, v in points]
+
+
+def _build_cluster_time_series(time_series, cluster_assignments, interval_minutes):
+    """
+    Build per-cluster aggregated time series by summing member template counts.
+    Returns Dict[str, SortedDict[datetime->count]] keyed by 'cluster_<id>'.
+    """
+    from sortedcontainers import SortedDict
+
+    cluster_to_members = {}
+    for template_hash, cluster_id in cluster_assignments.items():
+        cluster_to_members.setdefault(cluster_id, []).append(template_hash)
+
+    clusters_ts = {}
+    for cluster_id, members in cluster_to_members.items():
+        # union timestamps across members
+        all_ts = set()
+        for th in members:
+            ts_dict = time_series.get(th)
+            if ts_dict:
+                all_ts.update(ts_dict.keys())
+        if not all_ts:
+            continue
+
+        # build continuous range
+        start_ts = min(all_ts)
+        end_ts = max(all_ts)
+        current = start_ts
+        agg = SortedDict()
+        while current <= end_ts:
+            total = 0
+            for th in members:
+                ts_dict = time_series.get(th)
+                if ts_dict:
+                    total += int(ts_dict.get(current, 0))
+            agg[current] = total
+            current += timedelta(minutes=interval_minutes)
+
+        clusters_ts[f"cluster_{cluster_id}"] = agg
+
+    return clusters_ts
+
+
+def forecast_workload_with_pipeline(time_series,
+                                    horizon_minutes,
+                                    template_stats=None,
+                                    clustering_result=None,
+                                    forecast_level='template',
+                                    max_keys=20,
+                                    model_types=None,
+                                    train_if_missing=True):
+    """
+    Forecast workload using ForecastingPipeline.generate_forecasts().
+
+    What is forecasted:
+      - per-template (template_hash) execution counts over time buckets, or
+      - per-cluster (cluster_<id>) aggregated execution counts over time buckets.
+    """
+    global forecasting_pipeline
+
+    if not time_series:
+        return {
+            'forecast_interval_minutes': horizon_minutes,
+            'level': forecast_level,
+            'series_count': 0,
+            'forecasts': {},
+            'model_types': model_types or [],
+            'note': 'no time series data'
+        }
+
+    if model_types is None:
+        # Default to AR only to keep forecast lightweight.
+        model_types = ['ar']
+
+    # Infer bucket interval from any template series.
+    sample_ts = next(iter(time_series.values()))
+    interval_minutes = _infer_interval_minutes(sample_ts)
+    horizon_steps = int(np.ceil(horizon_minutes / float(interval_minutes)))
+
+    # Select keys to forecast.
+    def _top_keys_from_stats(stats, limit):
+        if not stats:
+            return list(time_series.keys())[:limit]
+        return sorted(stats.keys(),
+                      key=lambda k: stats[k].get('total_queries', 0),
+                      reverse=True)[:limit]
+
+    template_keys = _top_keys_from_stats(template_stats, max_keys)
+
+    cluster_ts = {}
+    cluster_keys = []
+    if clustering_result and clustering_result.get('cluster_assignments'):
+        cluster_ts = _build_cluster_time_series(
+            time_series,
+            clustering_result['cluster_assignments'],
+            interval_minutes
+        )
+        cluster_keys = list(cluster_ts.keys())
+
+    forecasts_out = {}
+
+    def _forecast_one_series(series_key, ts_dict):
+        series = _sorted_dict_to_series(ts_dict)
+        if not series:
+            return None
+
+        last_ts, last_val = series[-1]
+
+        # Attempt to ensure we have trained models (trained on the fly from CSV-derived series).
+        if forecasting_pipeline is None:
+            return {
+                'model': 'naive',
+                'interval_minutes': interval_minutes,
+                'points': _jsonify_forecast_points(_naive_forecast_points(last_ts, last_val, horizon_steps, interval_minutes)),
+                'note': 'forecasting_pipeline unavailable'
+            }
+
+        if train_if_missing:
+            for mt in model_types:
+                try:
+                    forecaster = forecasting_pipeline.get_model(series_key, mt)
+                    if forecaster is None or not getattr(forecaster, 'is_trained', False):
+                        # Create a forecaster to check min samples requirement.
+                        temp_forecaster = forecasting_pipeline.create_forecaster(mt)
+                        min_required = temp_forecaster.get_min_required_samples()
+                        if len(series) >= min_required:
+                            forecasting_pipeline.train_model(mt, series, series_key, save_model=False)
+                        else:
+                            logger.debug(f"Skip training {mt} for {series_key}: {len(series)} < {min_required}")
+                except Exception as e:
+                    logger.warning(f"Training step failed for {series_key} ({mt}): {e}")
+
+        # Generate forecasts
+        try:
+            model_forecasts = forecasting_pipeline.generate_forecasts(
+                model_key=series_key,
+                horizon_minutes=horizon_minutes,
+                model_types=model_types
+            )
+        except Exception as e:
+            logger.warning(f"Forecast generation failed for {series_key}: {e}")
+            model_forecasts = {}
+
+        # Pick a primary model (first available) and fall back to naive.
+        for mt in model_types:
+            points = model_forecasts.get(mt)
+            if points:
+                return {
+                    'model': mt,
+                    'interval_minutes': interval_minutes,
+                    'points': _jsonify_forecast_points(points),
+                    'models': {k: _jsonify_forecast_points(v) for k, v in model_forecasts.items() if v},
+                }
+
+        return {
+            'model': 'naive',
+            'interval_minutes': interval_minutes,
+            'points': _jsonify_forecast_points(_naive_forecast_points(last_ts, last_val, horizon_steps, interval_minutes)),
+            'note': 'no trained model available; using naive repeat-last'
+        }
+
+    if forecast_level in ('template', 'both'):
+        for th in template_keys:
+            ts_dict = time_series.get(th)
+            if not ts_dict:
+                continue
+            result = _forecast_one_series(th, ts_dict)
+            if result:
+                forecasts_out[th] = result
+
+    if forecast_level in ('cluster', 'both'):
+        for ck in cluster_keys:
+            ts_dict = cluster_ts.get(ck)
+            if not ts_dict:
+                continue
+            result = _forecast_one_series(ck, ts_dict)
+            if result:
+                forecasts_out[ck] = result
+
+    return {
+        'forecast_interval_minutes': horizon_minutes,
+        'level': forecast_level,
+        'interval_minutes': interval_minutes,
+        'series_count': len(forecasts_out),
+        'model_types': model_types,
+        'max_keys': max_keys,
+        'forecasts': forecasts_out,
     }
 
 
@@ -221,6 +591,24 @@ def recommend_indexes(workload_data):
             })
 
     return recommendations[:5]  # Limit recommendations
+
+
+def resolve_workload_log_file_from_db(db_params):
+    """Read workload_forecast.log_file from Postgres (returns None on failure)."""
+    try:
+        import psycopg2
+        conn = psycopg2.connect(**db_params)
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT current_setting('workload_forecast.log_file')::text")
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return str(row[0])
+        finally:
+            conn.close()
+    except Exception as e:
+        logger.warning(f"Failed to read workload_forecast.log_file from DB ({e}); using fallback")
+    return None
 
 
 @app.route('/')
@@ -315,53 +703,7 @@ def analyze_workload():
             )
             logger.info("Initialized OnlineWorkloadClusterer")
 
-        # Initialize forecasting pipeline if not already done
-        if forecasting_pipeline is None:
-            forecasting_config = {
-                'models_dir': 'models/forecasting',
-                'retrain_interval_hours': 24,
-                'min_training_samples': 50,
-                'validation_split': 0.2,
-                'enable_auto_retraining': True,
-                'database': {
-                    'host': 'localhost',
-                    'port': 15432,
-                    'database': 'neurdb_metrics',
-                    'user': 'neurdb',
-                    'password': ''
-                },
-                'model_configs': {
-                    'ar': {
-                        'max_order': 8,
-                        'auto_order': True,
-                        'seasonal': True
-                    },
-                    'rnn': {
-                        'hidden_size': 64,
-                        'num_layers': 2,
-                        'sequence_length': 24,
-                        'epochs': 50,
-                        'batch_size': 16
-                    },
-                    'spectral': {
-                        'n_harmonics': 15,
-                        'frequency_threshold': 0.05,
-                        'detrend_method': 'linear'
-                    },
-                    'ensemble': {
-                        'models': ['ar', 'rnn', 'spectral'],
-                        'weight_optimization': 'performance',
-                        'performance_window': 20
-                    }
-                }
-            }
-
-            try:
-                forecasting_pipeline = ForecastingPipeline(forecasting_config)
-                logger.info("Initialized ForecastingPipeline")
-            except Exception as e:
-                logger.warning(f"Failed to initialize forecasting pipeline: {e}")
-                forecasting_pipeline = None
+        ensure_forecasting_pipeline_initialized()
 
         # Load workload data using advanced templatizer
         query_data, time_series = load_workload_from_csv(log_file_path, templatizer)
@@ -386,6 +728,15 @@ def analyze_workload():
                     template_hash = entry['template_hash']
                     template_info = templatizer.extract_logical_features(entry['original_query'], entry['template'])
                     workload_store.store_query_template(template_hash, entry['template'], template_info)
+
+                # Store workload time series (execution counts per bucket) for training/retraining.
+                for template_hash, ts_dict in time_series.items():
+                    for ts, count in ts_dict.items():
+                        try:
+                            workload_store.store_workload_timeseries(template_hash, ts, int(count), None)
+                        except Exception:
+                            # Best-effort only; avoid failing /analyze_workload on metrics DB issues.
+                            pass
 
                 # Store clustering session
                 session_id = workload_store.create_clustering_session(
@@ -437,8 +788,22 @@ def analyze_workload():
                 }
             })
 
-        # Forecast future workload (placeholder - will be enhanced in Phase 3)
-        forecast = forecast_workload(query_data, forecast_horizon)
+        # Forecast future workload (Phase 3): forecast per-template or per-cluster time series.
+        forecast_level = data.get('forecast_level', 'template')  # template|cluster|both
+        forecast_max_keys = int(data.get('forecast_max_keys', 20))
+        forecast_model_types = data.get('forecast_model_types', ['ar'])
+        forecast_train_if_missing = bool(data.get('forecast_train_if_missing', True))
+
+        forecast = forecast_workload_with_pipeline(
+            time_series=time_series,
+            horizon_minutes=forecast_horizon,
+            template_stats=template_stats,
+            clustering_result=clustering_result,
+            forecast_level=forecast_level,
+            max_keys=forecast_max_keys,
+            model_types=_parse_model_types(forecast_model_types),
+            train_if_missing=forecast_train_if_missing
+        )
 
         # Generate index recommendations (placeholder - will be enhanced in Phase 4)
         recommendations = []
@@ -634,7 +999,7 @@ def ingest_query():
         logger.info(f"Ingested query, template hash: {template_hash}")
 
         # Log to file (append mode)
-        log_file = data.get('log_file', '/tmp/neurdb_workload.csv')
+        log_file = data.get('log_file') or app.config.get('LOG_FILE') or '/tmp/neurdb_workload.csv'
         with open(log_file, 'a') as f:
             f.write(f"{timestamp},{template_hash},\"{template}\",\"{sql}\"\n")
 
@@ -1696,10 +2061,6 @@ def auto_create_indexes():
         if not data:
             return jsonify({'error': 'Invalid JSON'}), 400
 
-        # Strategy selection: predictive (search optimal set) vs reactive (per-query, no search)
-        # Default to reactive to avoid long searches unless explicitly requested
-        strategy = str(data.get('strategy', 'reactive')).lower()
-
         def _json_safe(obj):
             """Convert Enums and nested structures into JSON-serializable types."""
             from enum import Enum as PyEnum
@@ -1720,48 +2081,6 @@ def auto_create_indexes():
             'password': data.get('database_password', 'postgres')
         }
 
-        # Reactive path: process each query individually using the reactive manager (no configuration search)
-        if strategy == 'reactive':
-            workload_queries = data.get('workload_queries', [])
-            if not workload_queries:
-                return jsonify({'error': 'No workload queries provided for reactive auto_create'}), 400
-            logger.debug(f"data.get('max_analysis_time_seconds'): {data.get('max_analysis_time_seconds', 5)}")
-
-            config = ReactiveConfig(
-                storage_budget_mb=data.get('storage_budget_mb', 1000.0),
-                min_benefit_threshold=data.get('min_benefit_threshold', 0.1),
-                eviction_policy=EvictionPolicy(data.get('eviction_policy', 'benefit_based')),
-                max_indexes_total=data.get('max_indexes_total', 50),
-                cache_recommendations=data.get('cache_recommendations', True),
-                recommendation_ttl_hours=data.get('recommendation_ttl_hours', 1),
-                max_analysis_time_seconds=data.get('max_analysis_time_seconds', 5),
-                enable_auto_creation=True,
-                database_host=db_params['host'],
-                database_port=db_params['port'],
-                database_name=db_params['database'],
-                database_user=db_params['user'],
-                database_password=db_params['password']
-            )
-
-            # Always create a fresh manager for this request to honor supplied DB params
-            reactive_mgr = ReactiveIndexManager(config)
-
-            reactive_results = []
-            total_created = 0
-            for q in workload_queries:
-                query_text = q.get('query', q) if isinstance(q, dict) else str(q)
-                result = run_async(reactive_mgr.process_query(query_text, force_analysis=True))
-                reactive_results.append(result)
-                total_created += len(result.get('created_indexes', []))
-
-            return jsonify({
-                'status': 'success',
-                'strategy': 'reactive',
-                'message': 'Reactive auto-create completed',
-                'created_indexes': total_created,
-                'results': _json_safe(reactive_results)
-            })
-
         # Get recommended indexes (either from request or generate them)
         recommended_indexes = data.get('recommended_indexes', [])
 
@@ -1778,10 +2097,10 @@ def auto_create_indexes():
             advisor = CostBasedIndexAdvisor(db_params)
 
             result = advisor.recommend_indexes(
-                workload_queries=workload_queries,
-                schema_info=schema_info,
-                time_limit_seconds=data.get('time_limit_seconds', 30),
-                reactive=(strategy == 'reactive')
+                workload_queries,
+                schema_info,
+                data.get('time_limit_seconds', 30),
+                False
             )
 
             # Convert recommended indexes to the expected format
@@ -2160,7 +2479,7 @@ def get_storage_stats():
 @app.route('/guc_change', methods=['POST'])
 def handle_guc_change():
     """Handle GUC parameter change notifications from PostgreSQL"""
-    global request_count, predictive_manager, reactive_manager
+    global request_count, predictive_manager
     request_count += 1
 
     try:
@@ -2202,36 +2521,7 @@ def handle_guc_change():
         elif parameter == 'nr_index_management_strategy':
             logger.info(f"Index management strategy changed to: {value}")
 
-            # Initialize the appropriate manager
-            if value == 'reactive':
-                if reactive_manager is None:
-                    logger.info("Initializing ReactiveIndexManager...")
-                    config = ReactiveConfig(
-                        storage_budget_mb=1000.0,
-                        recommendation_ttl_hours=1,
-                        enable_auto_creation=True,
-                        eviction_policy=EvictionPolicy.BENEFIT_BASED,
-                        database_host='localhost',
-                        database_port=5432,
-                        database_name='imdb_test',
-                        database_user='neurdb',
-                        database_password=''
-                    )
-                    reactive_manager = ReactiveIndexManager(config)
-                    logger.info("ReactiveIndexManager initialized successfully")
-
-                # Reactive manager is ready for use
-                logger.info("Reactive manager initialized and ready for queries")
-
-                return jsonify({
-                    'status': 'success',
-                    'message': f'Reactive strategy initialized and monitoring started',
-                    'strategy': value,
-                    'timestamp': datetime.now().isoformat(),
-                    'manager_initialized': reactive_manager is not None
-                })
-
-            elif value == 'predictive':
+            if value == 'predictive':
                 if predictive_manager is None:
                     logger.info("Initializing PredictiveIndexManager...")
                     config = PredictiveConfig(
@@ -2252,6 +2542,13 @@ def handle_guc_change():
                     'strategy': value,
                     'timestamp': datetime.now().isoformat(),
                     'manager_initialized': predictive_manager is not None
+                })
+            else:
+                return jsonify({
+                    'status': 'success',
+                    'message': f'Index management strategy \"{value}\" ignored by AI engine (predictive-only)',
+                    'strategy': value,
+                    'timestamp': datetime.now().isoformat()
                 })
 
         else:
@@ -2274,7 +2571,6 @@ def handle_guc_change():
 
 # Global variables for index managers (in production, these would be properly managed)
 predictive_manager = None
-reactive_manager = None
 
 @app.route('/index/predictive/optimize', methods=['POST'])
 def predictive_optimize():
@@ -2349,281 +2645,6 @@ def predictive_status():
         }), 500
 
 
-@app.route('/index/reactive/recommend', methods=['POST'])
-def reactive_recommend():
-    """Get reactive index recommendation for a single query"""
-    global reactive_manager
-
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Invalid JSON'}), 400
-
-        query_text = data.get('query_text')
-        if not query_text:
-            return jsonify({'error': 'query_text is required'}), 400
-
-        # Configuration
-        config = ReactiveConfig(
-            storage_budget_mb=data.get('storage_budget_mb', 1000.0),
-            min_benefit_threshold=data.get('min_benefit_threshold', 0.1),
-            eviction_policy=EvictionPolicy(data.get('eviction_policy', 'benefit_based')),
-            max_indexes_total=data.get('max_indexes_total', 50),
-            cache_recommendations=data.get('cache_recommendations', True),
-            recommendation_ttl_hours=data.get('recommendation_ttl_hours', 1),
-            enable_auto_creation=data.get('enable_auto_creation', False),  # Require explicit action for creation
-            database_host='localhost',
-            database_port=5432,
-            database_name='imdb_test',
-            database_user='neurdb',
-            database_password=''
-        )
-
-        # Initialize manager if needed
-        if reactive_manager is None:
-            reactive_manager = ReactiveIndexManager(config)
-        else:
-            reactive_manager.update_config(config)
-
-        # Get recommendation
-        result = run_async(reactive_manager.process_query(query_text, force_analysis=True))
-
-        return jsonify({
-            'status': 'success',
-            'message': 'Reactive recommendation generated',
-            'timestamp': datetime.now().isoformat(),
-            'query_text': query_text,
-            'recommendations': result
-        })
-
-    except Exception as e:
-        logger.error(f"Error in reactive_recommend: {e}", exc_info=True)
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-
-@app.route('/index/reactive/manage', methods=['POST'])
-def reactive_manage():
-    """Create index with reactive budget management"""
-    global reactive_manager
-
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Invalid JSON'}), 400
-
-        query_text = data.get('query_text')
-        auto_create = data.get('auto_create', True)
-
-        if not query_text:
-            return jsonify({'error': 'query_text is required'}), 400
-
-        # Rely on dbengine-provided auto_create flag (already derived from GUCs).
-        logger.info(f"Reactive query processing: auto_create={auto_create}")
-
-        # Configuration with auto-creation enabled
-        config = ReactiveConfig(
-            storage_budget_mb=data.get('storage_budget_mb', 1000.0),
-            min_benefit_threshold=data.get('min_benefit_threshold', 0.1),
-            eviction_policy=EvictionPolicy(data.get('eviction_policy', 'benefit_based')),
-            max_indexes_total=data.get('max_indexes_total', 50),
-            cache_recommendations=data.get('cache_recommendations', True),
-            recommendation_ttl_hours=data.get('recommendation_ttl_hours', 1),
-            enable_auto_creation=auto_create,
-            database_host='localhost',
-            database_port=5432,
-            database_name='imdb_test',
-            database_user='neurdb',
-            database_password=''
-        )
-
-        # Initialize manager if needed
-        if reactive_manager is None:
-            reactive_manager = ReactiveIndexManager(config)
-        else:
-            reactive_manager.update_config(config)
-
-        # Process query with potential index creation
-        result = run_async(reactive_manager.process_query(query_text, force_analysis=True))
-
-        return jsonify({
-            'status': 'success',
-            'message': 'Reactive index management completed',
-            'timestamp': datetime.now().isoformat(),
-            'query_text': query_text,
-            'auto_create_enabled': auto_create,
-            'result': result
-        })
-
-    except Exception as e:
-        logger.error(f"Error in reactive_manage: {e}", exc_info=True)
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-
-@app.route('/index/reactive/status', methods=['GET'])
-def reactive_status():
-    """Get reactive index manager status"""
-    global reactive_manager
-
-    try:
-        if reactive_manager is None:
-            return jsonify({
-                'status': 'not_initialized',
-                'message': 'Reactive manager not initialized'
-            })
-
-        status = reactive_manager.get_status()
-
-        return jsonify({
-            'status': 'success',
-            'timestamp': datetime.now().isoformat(),
-            'data': status
-        })
-
-    except Exception as e:
-        logger.error(f"Error in reactive_status: {e}", exc_info=True)
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-
-@app.route('/index/reactive/initialize', methods=['POST'])
-def reactive_initialize():
-    """Initialize reactive index manager with default configuration"""
-    global reactive_manager
-
-    try:
-        data = request.get_json() or {}
-
-        # Configuration with correct parameter names
-        config = ReactiveConfig(
-            storage_budget_mb=data.get('storage_budget_mb', 1000.0),
-            recommendation_ttl_hours=data.get('recommendation_ttl_hours', 1),
-            enable_auto_creation=data.get('enable_auto_creation', True),
-            eviction_policy=EvictionPolicy(data.get('eviction_policy', 'benefit_based')),
-            database_host=data.get('database_host', 'localhost'),
-            database_port=data.get('database_port', 5432),
-            database_name=data.get('database_name', 'imdb_test'),
-            database_user=data.get('database_user', 'neurdb'),
-            database_password=data.get('database_password', 'postgres')
-        )
-
-        # Initialize manager
-        reactive_manager = ReactiveIndexManager(config)
-
-        # Reactive manager is ready for use
-        logger.info("ReactiveIndexManager initialized and ready for queries")
-
-        logger.info("ReactiveIndexManager initialized via API call")
-
-        return jsonify({
-            'status': 'success',
-            'message': 'Reactive manager initialized successfully',
-            'timestamp': datetime.now().isoformat(),
-            'config': {
-                'storage_budget_mb': config.storage_budget_mb,
-                'recommendation_ttl_hours': config.recommendation_ttl_hours,
-                'enable_auto_creation': config.enable_auto_creation,
-                'eviction_policy': config.eviction_policy.value,
-                'database_host': config.database_host,
-                'database_name': config.database_name
-            }
-        })
-
-    except Exception as e:
-        logger.error(f"Error initializing reactive manager: {e}", exc_info=True)
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-
-@app.route('/index/reactive/test', methods=['POST'])
-def reactive_test():
-    """Test reactive functionality with a sample query"""
-    global reactive_manager
-
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Invalid JSON'}), 400
-
-        # Use provided query or a default test query
-        query_text = data.get('query_text', 'SELECT * FROM imdb_test.title WHERE kind_id = 1 AND production_year > 2000')
-        auto_create = data.get('auto_create', False)
-
-        # Initialize manager if needed
-        if reactive_manager is None:
-            config = ReactiveConfig(
-                storage_budget_mb=1000.0,
-                recommendation_ttl_hours=1,
-                enable_auto_creation=auto_create,
-                eviction_policy=EvictionPolicy.BENEFIT_BASED,
-                database_host='localhost',
-                database_port=5432,
-                database_name='imdb_test',
-                database_user='neurdb',
-                database_password=''
-            )
-            reactive_manager = ReactiveIndexManager(config)
-
-        # Process the query
-        result = run_async(reactive_manager.process_query(query_text, force_analysis=True))
-
-        return jsonify({
-            'status': 'success',
-            'message': 'Reactive test completed',
-            'timestamp': datetime.now().isoformat(),
-            'query_text': query_text,
-            'auto_create_enabled': auto_create,
-            'result': result
-        })
-
-    except Exception as e:
-        logger.error(f"Error in reactive_test: {e}", exc_info=True)
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-
-@app.route('/index/switch_strategy', methods=['POST'])
-def switch_strategy():
-    """Switch between predictive and reactive strategies"""
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({'error': 'Invalid JSON'}), 400
-
-        strategy = data.get('strategy')  # 'predictive' or 'reactive'
-
-        if strategy not in ['predictive', 'reactive']:
-            return jsonify({'error': 'Strategy must be "predictive" or "reactive"'}), 400
-
-        # In a real implementation, this would disable one strategy and enable the other
-        # For now, just return a success message indicating the requested strategy
-
-        return jsonify({
-            'status': 'success',
-            'message': f'Strategy switched to {strategy}',
-            'timestamp': datetime.now().isoformat(),
-            'active_strategy': strategy
-        })
-
-    except Exception as e:
-        logger.error(f"Error in switch_strategy: {e}", exc_info=True)
-        return jsonify({
-            'status': 'error',
-            'message': str(e)
-        }), 500
-
-
 def create_sample_workload():
     """Create sample workload data for testing"""
     sample_queries = [
@@ -2636,7 +2657,7 @@ def create_sample_workload():
         "SELECT * FROM movie_keyword WHERE keyword_id = 42 ORDER BY movie_id LIMIT 10"
     ]
 
-    log_file = '/tmp/neurdb_workload.csv'
+    log_file = app.config.get('LOG_FILE') or '/tmp/neurdb_workload.csv'
 
     # Create directory if needed
     os.makedirs(os.path.dirname(log_file), exist_ok=True)
@@ -2694,14 +2715,23 @@ if __name__ == '__main__':
         action='store_true',
         help='Create sample workload data for testing'
     )
-    parser.add_argument(
-        '--log-file',
-        type=str,
-        default='/tmp/neurdb_workload.csv',
-        help='Path to workload log file'
-    )
+    parser.add_argument('--db-host', type=str, default=os.environ.get('NEURDB_DB_HOST', 'localhost'))
+    parser.add_argument('--db-port', type=int, default=int(os.environ.get('NEURDB_DB_PORT', '15432')))
+    parser.add_argument('--db-name', type=str, default=os.environ.get('NEURDB_DB_NAME', 'neurdb'))
+    parser.add_argument('--db-user', type=str, default=os.environ.get('NEURDB_DB_USER', 'neurdb'))
+    parser.add_argument('--db-password', type=str, default=os.environ.get('NEURDB_DB_PASSWORD', 'postgres'))
 
     args = parser.parse_args()
+
+    db_params = {
+        'host': args.db_host,
+        'port': args.db_port,
+        'database': args.db_name,
+        'user': args.db_user,
+        'password': args.db_password,
+    }
+    app.config['LOG_FILE'] = resolve_workload_log_file_from_db(db_params) or '/tmp/neurdb_workload.csv'
+    start_periodic_retrainer()
 
     # Create sample data if requested
     if args.create_sample:
@@ -2713,7 +2743,7 @@ if __name__ == '__main__':
     print(f"=" * 60)
     print(f"NeurDB Workload Forecast AI Engine")
     print(f"Server: http://{args.host}:{args.port}")
-    print(f"Log file: {args.log_file}")
+    print(f"Log file: {app.config['LOG_FILE']}")
     print(f"Debug mode: {args.debug}")
     print(f"=" * 60)
     print()
@@ -2753,16 +2783,8 @@ if __name__ == '__main__':
     print("Index Management Strategy endpoints:")
     print(f"  POST http://{args.host}:{args.port}/index/predictive/optimize")
     print(f"  GET  http://{args.host}:{args.port}/index/predictive/status")
-    print(f"  POST http://{args.host}:{args.port}/index/reactive/recommend")
-    print(f"  POST http://{args.host}:{args.port}/index/reactive/manage")
-    print(f"  GET  http://{args.host}:{args.port}/index/reactive/status")
-    print(f"  POST http://{args.host}:{args.port}/index/switch_strategy")
     print()
 
-    app.config['LOG_FILE'] = args.log_file
-
-
-if __name__ == '__main__':
     try:
         app.run(
             host=args.host,
@@ -2770,7 +2792,9 @@ if __name__ == '__main__':
             debug=args.debug
         )
     except KeyboardInterrupt:
+        _retrain_stop_event.set()
         print("\nServer stopped by user")
     except Exception as e:
+        _retrain_stop_event.set()
         logger.error(f"Server error: {e}", exc_info=True)
         print(f"Server error: {e}")

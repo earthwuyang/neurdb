@@ -139,8 +139,8 @@ if curl -s http://localhost:8777/health >/dev/null 2>&1; then
     sleep 2
 
     # Check AI engine status
-    echo "Checking AI engine reactive status..."
-    curl -s http://localhost:8777/index/reactive/status | python -m json.tool 2>/dev/null || echo "AI engine status check failed"
+    echo "Checking AI engine predictive status..."
+    curl -s http://localhost:8777/index/predictive/status | python -m json.tool 2>/dev/null || echo "AI engine status check failed"
 
 else
     echo "⚠ AI engine is not running - skipping integration test"

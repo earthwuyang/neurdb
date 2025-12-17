@@ -1,1 +1,0 @@
-psql -h localhost -p 15432 -U neurdb -d imdb_test -c "set workload_forecast.enable=on; alter database imdb_test set nr_max_index_storage_mb=10000; select nr_send_reactive_query_to_ai('select * from cast_info where cast_info.person_id=12345');"

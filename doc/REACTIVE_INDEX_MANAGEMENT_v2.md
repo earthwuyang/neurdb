@@ -528,3 +528,14 @@ Also remove:
 2. **Cold queries**: v2 does **not** avoid cold queries initially (no frequency threshold gate). Rate limiting still applies for HypoPG evaluations.
 3. **Multi-column width**: default max width is **3**, exposed as a configurable GUC (e.g., `nr_reactive.max_columns_per_index`).
 4. **Value function**: use the **holistic HypoPG + EXPLAIN marginal benefit model** described above (with attribution + touch + cost + EWMA).
+
+
+
+## Files
+in output/:
+mixed_workload.csv
+noauto_queries.csv / auto_queries.csv
+per_query_comparison.csv
+top_regressions.csv
+top_improvements.csv
+noauto_nrim_events.csv / auto_nrim_events.csv

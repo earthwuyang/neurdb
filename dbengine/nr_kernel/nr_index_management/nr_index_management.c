@@ -3288,6 +3288,9 @@ typedef struct NrimTableFeat
     Bitmapset *eq_cols;     /* members are attnum-1 */
     Bitmapset *range_cols;  /* members are attnum-1 */
     Bitmapset *join_cols;   /* members are attnum-1 */
+    Bitmapset *filter_cols; /* all predicate cols (sargable or not), members are attnum-1 */
+    Bitmapset *sargable_filter_cols;    /* members are attnum-1 */
+    Bitmapset *nonsargable_filter_cols; /* members are attnum-1 (e.g., Var wrapped in a cast/coercion) */
     List *order_cols;       /* List of int (attnum) in order */
     List *group_cols;       /* List of int (attnum) in order */
 } NrimTableFeat;
@@ -3308,6 +3311,10 @@ typedef struct NrimFeatCtx
 static NrimTableFeat *nrim_get_table_feat(List **tables, Oid relid);
 static void nrim_add_att_bitmap(Bitmapset **bms, AttrNumber attnum);
 static void nrim_add_att_list_unique(List **list, AttrNumber attnum);
+static Node *nrim_strip_coercions_for_sargability(Node *node, bool *coerced);
+static bool nrim_collect_var_attnum_sargability(Query *query, Node *expr,
+                                                Oid *relid, AttrNumber *attnum,
+                                                bool *sargable);
 static bool nrim_feat_walker(Node *node, NrimFeatCtx *ctx);
 static void nrim_collect_order_group(Query *query, List **tables);
 static void nrim_generate_candidates_for_table(NrimTableFeat *tf, List **cands);
@@ -3420,6 +3427,116 @@ nrim_add_att_list_unique(List **list, AttrNumber attnum)
     *list = lappend_int(*list, attnum);
 }
 
+/*
+ * Determine whether a Var is wrapped in an implicit/explicit coercion.
+ *
+ * The reactive index manager should avoid suggesting indexes for predicates
+ * where the Var side is coerced (e.g., (col)::numeric > 1.23), because such
+ * predicates are typically non-sargable for a plain btree index on col and can
+ * lead to "ORDER BY-only" index scans that filter row-by-row.
+ */
+static Node *
+nrim_strip_coercions_for_sargability(Node *node, bool *coerced)
+{
+    bool saw_coercion = false;
+
+    if (node == NULL)
+    {
+        if (coerced)
+            *coerced = false;
+        return NULL;
+    }
+
+    for (;;)
+    {
+        if (node == NULL)
+            break;
+
+        if (IsA(node, CollateExpr))
+        {
+            node = (Node *) ((CollateExpr *) node)->arg;
+            continue;
+        }
+
+        if (IsA(node, RelabelType))
+        {
+            saw_coercion = true;
+            node = (Node *) ((RelabelType *) node)->arg;
+            continue;
+        }
+
+        if (IsA(node, CoerceViaIO))
+        {
+            saw_coercion = true;
+            node = (Node *) ((CoerceViaIO *) node)->arg;
+            continue;
+        }
+
+        if (IsA(node, CoerceToDomain))
+        {
+            saw_coercion = true;
+            node = (Node *) ((CoerceToDomain *) node)->arg;
+            continue;
+        }
+
+        if (IsA(node, ArrayCoerceExpr))
+        {
+            saw_coercion = true;
+            node = (Node *) ((ArrayCoerceExpr *) node)->arg;
+            continue;
+        }
+
+        if (IsA(node, FuncExpr))
+        {
+            FuncExpr *f = (FuncExpr *) node;
+
+            /*
+             * Many casts are represented as FuncExpr with a non-call display
+             * form. If it's a unary cast/coercion, peel it and flag it.
+             */
+            if (f->funcformat != COERCE_EXPLICIT_CALL && list_length(f->args) == 1)
+            {
+                saw_coercion = true;
+                node = (Node *) linitial(f->args);
+                continue;
+            }
+        }
+
+        break;
+    }
+
+    if (coerced)
+        *coerced = saw_coercion;
+    return node;
+}
+
+static bool
+nrim_collect_var_attnum_sargability(Query *query, Node *expr,
+                                   Oid *relid, AttrNumber *attnum,
+                                   bool *sargable)
+{
+    bool coerced = false;
+    Node *base;
+
+    if (expr == NULL || query == NULL)
+        return false;
+
+    base = nrim_strip_coercions_for_sargability(expr, &coerced);
+    base = strip_implicit_coercions(base);
+
+    if (base && IsA(base, Var))
+    {
+        if (collect_var_attnum(query, (Var *) base, relid, attnum))
+        {
+            if (sargable)
+                *sargable = !coerced;
+            return true;
+        }
+    }
+
+    return false;
+}
+
 static bool
 nrim_feat_walker(Node *node, NrimFeatCtx *ctx)
 {
@@ -3431,60 +3548,82 @@ nrim_feat_walker(Node *node, NrimFeatCtx *ctx)
         OpExpr *op = (OpExpr *) node;
         if (list_length(op->args) == 2)
         {
-            Node *lhs = strip_implicit_coercions((Node *) linitial(op->args));
-            Node *rhs = strip_implicit_coercions((Node *) lsecond(op->args));
             bool is_eq = is_equality_op(op->opno);
             bool is_rng = is_range_op(op->opno);
+            Node *lhs_raw;
+            Node *rhs_raw;
+            Oid relid_l;
+            Oid relid_r;
+            AttrNumber att_l;
+            AttrNumber att_r;
+            bool lhs_sargable;
+            bool rhs_sargable;
+            bool lhs_is_var;
+            bool rhs_is_var;
 
-            if (lhs && rhs && is_eq && IsA(lhs, Var) && IsA(rhs, Var))
+            lhs_raw = (Node *) linitial(op->args);
+            rhs_raw = (Node *) lsecond(op->args);
+            lhs_is_var = nrim_collect_var_attnum_sargability(ctx->query, lhs_raw,
+                                                            &relid_l, &att_l,
+                                                            &lhs_sargable);
+            rhs_is_var = nrim_collect_var_attnum_sargability(ctx->query, rhs_raw,
+                                                            &relid_r, &att_r,
+                                                            &rhs_sargable);
+
+            if (lhs_is_var)
             {
-                Oid relid_l, relid_r;
-                AttrNumber att_l, att_r;
-                if (collect_var_attnum(ctx->query, (Var *) lhs, &relid_l, &att_l) &&
-                    collect_var_attnum(ctx->query, (Var *) rhs, &relid_r, &att_r))
-                {
-                    NrimTableFeat *tfl = nrim_get_table_feat(ctx->tables, relid_l);
-                    NrimTableFeat *tfr = nrim_get_table_feat(ctx->tables, relid_r);
+                NrimTableFeat *tfl = nrim_get_table_feat(ctx->tables, relid_l);
+                nrim_add_att_bitmap(&tfl->filter_cols, att_l);
+                if (lhs_sargable)
+                    nrim_add_att_bitmap(&tfl->sargable_filter_cols, att_l);
+                else
+                    nrim_add_att_bitmap(&tfl->nonsargable_filter_cols, att_l);
+            }
 
-                    if (relid_l != relid_r)
-                    {
-                        nrim_add_att_bitmap(&tfl->join_cols, att_l);
-                        nrim_add_att_bitmap(&tfr->join_cols, att_r);
-                    }
-                    else
-                    {
-                        nrim_add_att_bitmap(&tfl->eq_cols, att_l);
-                        nrim_add_att_bitmap(&tfl->eq_cols, att_r);
-                    }
+            if (rhs_is_var)
+            {
+                NrimTableFeat *tfr = nrim_get_table_feat(ctx->tables, relid_r);
+                nrim_add_att_bitmap(&tfr->filter_cols, att_r);
+                if (rhs_sargable)
+                    nrim_add_att_bitmap(&tfr->sargable_filter_cols, att_r);
+                else
+                    nrim_add_att_bitmap(&tfr->nonsargable_filter_cols, att_r);
+            }
+
+            if (is_eq && lhs_is_var && rhs_is_var && lhs_sargable && rhs_sargable)
+            {
+                NrimTableFeat *tfl = nrim_get_table_feat(ctx->tables, relid_l);
+                NrimTableFeat *tfr = nrim_get_table_feat(ctx->tables, relid_r);
+
+                if (relid_l != relid_r)
+                {
+                    nrim_add_att_bitmap(&tfl->join_cols, att_l);
+                    nrim_add_att_bitmap(&tfr->join_cols, att_r);
+                }
+                else
+                {
+                    nrim_add_att_bitmap(&tfl->eq_cols, att_l);
+                    nrim_add_att_bitmap(&tfl->eq_cols, att_r);
                 }
             }
             else
             {
-                if (lhs && IsA(lhs, Var))
+                if (lhs_is_var && lhs_sargable)
                 {
-                    Oid relid;
-                    AttrNumber attnum;
-                    if (collect_var_attnum(ctx->query, (Var *) lhs, &relid, &attnum))
-                    {
-                        NrimTableFeat *tf = nrim_get_table_feat(ctx->tables, relid);
-                        if (is_eq)
-                            nrim_add_att_bitmap(&tf->eq_cols, attnum);
-                        else if (is_rng)
-                            nrim_add_att_bitmap(&tf->range_cols, attnum);
-                    }
+                    NrimTableFeat *tfl = nrim_get_table_feat(ctx->tables, relid_l);
+                    if (is_eq)
+                        nrim_add_att_bitmap(&tfl->eq_cols, att_l);
+                    else if (is_rng)
+                        nrim_add_att_bitmap(&tfl->range_cols, att_l);
                 }
-                if (rhs && IsA(rhs, Var))
+
+                if (rhs_is_var && rhs_sargable)
                 {
-                    Oid relid;
-                    AttrNumber attnum;
-                    if (collect_var_attnum(ctx->query, (Var *) rhs, &relid, &attnum))
-                    {
-                        NrimTableFeat *tf = nrim_get_table_feat(ctx->tables, relid);
-                        if (is_eq)
-                            nrim_add_att_bitmap(&tf->eq_cols, attnum);
-                        else if (is_rng)
-                            nrim_add_att_bitmap(&tf->range_cols, attnum);
-                    }
+                    NrimTableFeat *tfr = nrim_get_table_feat(ctx->tables, relid_r);
+                    if (is_eq)
+                        nrim_add_att_bitmap(&tfr->eq_cols, att_r);
+                    else if (is_rng)
+                        nrim_add_att_bitmap(&tfr->range_cols, att_r);
                 }
             }
         }
@@ -3549,9 +3688,26 @@ nrim_generate_candidates_for_table(NrimTableFeat *tf, List **cands)
     int maxw = nr_reactive_max_columns_per_index;
     List *eq_list = NIL;
     ListCell *lc;
+    bool skip_order_only = false;
+    int eq_used = 0;
 
     if (tf == NULL)
         return;
+
+    /*
+     * Guardrail: if there are non-sargable predicates on this table, avoid
+     * generating ORDER BY-only single-column candidates. These often get chosen
+     * for ordering with LIMIT, then filter row-by-row, causing long-tail
+     * regressions.
+     */
+    if (tf->order_cols != NIL &&
+        tf->filter_cols != NULL &&
+        tf->nonsargable_filter_cols != NULL)
+    {
+        skip_order_only = true;
+        if (nr_reactive_debug)
+            NRIM_ELOG("NRIM v2: skipping ORDER BY-only candidates for relid=%u due to non-sargable predicates", tf->relid);
+    }
 
     /* Single-column candidates from eq/join/order/group/range */
     member = -1;
@@ -3586,11 +3742,18 @@ nrim_generate_candidates_for_table(NrimTableFeat *tf, List **cands)
     }
     foreach(lc, tf->order_cols)
     {
-        NrimCand *c = palloc0(sizeof(*c));
-        c->relid = tf->relid;
-        c->ncols = 1;
-        c->cols[0] = (AttrNumber) lfirst_int(lc);
-        *cands = lappend(*cands, c);
+        AttrNumber ord = (AttrNumber) lfirst_int(lc);
+
+        if (!skip_order_only &&
+            (tf->nonsargable_filter_cols == NULL ||
+             !bms_is_member(ord - 1, tf->nonsargable_filter_cols)))
+        {
+            NrimCand *c = palloc0(sizeof(*c));
+            c->relid = tf->relid;
+            c->ncols = 1;
+            c->cols[0] = ord;
+            *cands = lappend(*cands, c);
+        }
     }
     foreach(lc, tf->group_cols)
     {
@@ -3627,14 +3790,37 @@ nrim_generate_candidates_for_table(NrimTableFeat *tf, List **cands)
     if (tf->order_cols != NIL && eq_list != NIL && maxw >= 2)
     {
         AttrNumber ord = (AttrNumber) linitial_int(tf->order_cols);
-        if (!list_member_int(eq_list, ord))
+        foreach(lc, eq_list)
         {
-            NrimCand *co = palloc0(sizeof(*co));
-            co->relid = tf->relid;
-            co->ncols = 2;
-            co->cols[0] = (AttrNumber) linitial_int(eq_list);
-            co->cols[1] = ord;
-            *cands = lappend(*cands, co);
+            AttrNumber eq = (AttrNumber) lfirst_int(lc);
+
+            if (eq == ord)
+                continue;
+
+            if (eq_used >= 2)
+                break;
+
+            /* Prefer (filter_col, order_col) for ORDER BY within a filtered subset */
+            {
+                NrimCand *co1 = palloc0(sizeof(*co1));
+                co1->relid = tf->relid;
+                co1->ncols = 2;
+                co1->cols[0] = eq;
+                co1->cols[1] = ord;
+                *cands = lappend(*cands, co1);
+            }
+
+            /* Also consider (order_col, filter_col) as an alternative */
+            {
+                NrimCand *co2 = palloc0(sizeof(*co2));
+                co2->relid = tf->relid;
+                co2->ncols = 2;
+                co2->cols[0] = ord;
+                co2->cols[1] = eq;
+                *cands = lappend(*cands, co2);
+            }
+
+            eq_used++;
         }
     }
 }

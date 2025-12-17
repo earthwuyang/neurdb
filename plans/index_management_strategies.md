@@ -3,7 +3,7 @@
 ## Overview
 Implementation of two complementary index management strategies for NeurDB:
 - **Predictive Strategy**: Proactive index management based on workload forecasting and clustering
-- **Reactive Strategy**: Real-time index management responding to incoming queries
+- **Reactive Strategy**: Real-time index management responding to incoming queries (implemented in-db; AI engine is predictive-only)
 
 ## Goals
 1. Minimize query execution time through optimal index selection
@@ -33,23 +33,7 @@ Implementation of two complementary index management strategies for NeurDB:
 ```
 
 ### Reactive Strategy Components
-```
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Incoming        │    │  Query           │    │  Benefit        │
-│  Query           │───▶│  Analysis        │───▶│  Calculation    │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────┐    ┌─────────────────┐    ┌─────────────────┐
-│  Index           │    │  Budget          │    │  Index          │
-│  Recommendation  │───▶│  Check           │───▶│  Creation       │
-└─────────────────┘    └─────────────────┘    └─────────────────┘
-         │                       │                       │
-         ▼                       ▼                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                  Eviction Logic (if needed)                       │
-└─────────────────────────────────────────────────────────────────┘
-```
+Reactive index management is handled inside Postgres (NeurDB) via `dbengine/nr_kernel/nr_index_management`; the AI engine server only supports predictive index tuning.
 
 ## Implementation Components
 
@@ -71,45 +55,12 @@ Implementation of two complementary index management strategies for NeurDB:
 - `WorkloadChangeType`: Enum of change types
 - `PredictiveConfig`: Configuration object
 
-### 2. Reactive Index Manager
-**File**: `aiengine/workload_forecast/src/reactive_index_manager.py`
-
-**Features**:
-- Real-time query analysis
-- Per-query index recommendation
-- Benefit calculation using HypoPG
-- Budget-aware index creation
-- LRU/MFU-based eviction policies
-- Query cost optimization
-- Immediate response to workload changes
-
-**Key Classes**:
-- `ReactiveIndexManager`: Main reactive manager
-- `IndexBenefit`: Represents index benefit calculation
-- `EvictionPolicy`: Base class for eviction strategies
-- `BudgetManager`: Manages storage budget and allocation
-
-### 3. Enhanced Database Functions
-**Files**:
-- `dbengine/nr_kernel/nr_workload_forecast/nr_workload_forecast.c`
-- `dbengine/nr_kernel/nr_workload_forecast/nr_workload_forecast--1.0.sql`
-
-**New Functions**:
-- `nr_get_index_benefit(index_name, query_text)`: Calculate benefit for specific query
-- `nr_evict_least_useful_index(required_space_mb)`: Evict least useful index
-- `nr_get_query_index_requirements(query_text)`: Analyze query index needs
-- `nr_calculate_index_creation_cost(columns[], index_type)`: Estimate creation cost
-
-### 4. API Endpoints
+### 2. API Endpoints
 **File**: `aiengine/workload_forecast/run_server.py`
 
 **New Endpoints**:
 - `POST /index/predictive/optimize`: Trigger predictive optimization
 - `GET /index/predictive/status`: Get predictive manager status
-- `POST /index/reactive/recommend`: Get recommendation for single query
-- `POST /index/reactive/manage`: Create index with budget management
-- `GET /index/reactive/status`: Get reactive manager status
-- `POST /index/switch_strategy`: Switch between strategies
 
 ## Implementation Details
 
@@ -142,22 +93,7 @@ Implementation of two complementary index management strategies for NeurDB:
    - Create new indexes using `nr_create_index_if_budget_allows()`
 
 ### Reactive Strategy Algorithm
-
-1. **Query Analysis**:
-   ```python
-   # Parse query to extract table references and predicates
-   # Generate potential index candidates
-   # Calculate benefit using HypoPG cost estimates
-   ```
-
-2. **Benefit Calculation**:
-   ```python
-   benefit = (baseline_cost - index_cost) / baseline_cost
-   if benefit > min_benefit_threshold:
-       recommend_index()
-   ```
-
-3. **Budget Management**:
+See `doc/REACTIVE_INDEX_MANAGEMENT_v2.md` and the in-db implementation in `dbengine/nr_kernel/nr_index_management`.
    ```python
    if required_space > available_budget:
        evict_index(find_least_useful_index())

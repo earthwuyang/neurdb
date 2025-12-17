@@ -9,6 +9,7 @@
 #include "optimizer/planner.h"
 #include "utils/guc.h"
 #include "utils/timestamp.h"
+#include "utils/memutils.h"
 #include "tcop/utility.h"
 #include "parser/analyze.h"
 #include "commands/extension.h"
@@ -27,7 +28,7 @@ static post_parse_analyze_hook_type prev_post_parse_analyze_hook = NULL;
 WorkloadForecastConfig workload_forecast_config = {
     .enable = false,
     .server_url = "http://localhost:8777",
-    .log_file = "/tmp/neurdb_workload.csv",
+    .log_file = NULL,
     .analysis_interval = 60,
     .auto_apply_indexes = false,
     .log_rotation_size = 100 * 1024 * 1024  /* 100MB */
@@ -38,12 +39,21 @@ static bool extension_initialized = false;
 
 /* Function declarations */
 static bool validate_log_directory(char **newval, void **extra, GucSource source);
-static double get_storage_budget_mb(void);
 
 /* Extension initialization */
 void
 _PG_init(void)
 {
+    char *default_log_file = NULL;
+    MemoryContext oldcontext;
+
+    oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+    if (DataDir != NULL && DataDir[0] != '\0')
+        default_log_file = psprintf("%s/%s", DataDir, "neurdb_workload.csv");
+    else
+        default_log_file = pstrdup("/tmp/neurdb_workload.csv");
+    MemoryContextSwitchTo(oldcontext);
+
     /* Define custom GUC variables */
     DefineCustomBoolVariable(
         "workload_forecast.enable",
@@ -76,7 +86,7 @@ _PG_init(void)
         "Path to workload log file",
         NULL,
         &workload_forecast_config.log_file,
-        "/tmp/neurdb_workload.csv",
+        default_log_file,
         PGC_SIGHUP,
         0,
         validate_log_directory,
@@ -265,105 +275,4 @@ workload_forecast_analyze(PG_FUNCTION_ARGS)
     pfree(response);
 
     PG_RETURN_BOOL(true);
-}
-
-/* SQL-callable function to send reactive query to AI engine */
-PG_FUNCTION_INFO_V1(nr_send_reactive_query_to_ai);
-Datum
-nr_send_reactive_query_to_ai(PG_FUNCTION_ARGS)
-{
-    text    *query_text = PG_GETARG_TEXT_P(0);
-    char    *query_str = text_to_cstring(query_text);
-    char    *rewritten_query = NULL;
-    char    *response = NULL;
-    StringInfoData cmd;
-    char    *url = NULL;
-    text    *result_text = NULL;
-    double   storage_budget = 0.0;
-
-    if (query_str == NULL)
-        PG_RETURN_NULL();
-
-    if (!workload_forecast_config.enable)
-    {
-        ereport(WARNING,
-                (errmsg("workload_forecast is disabled")));
-        pfree(query_str);
-        PG_RETURN_TEXT_P(cstring_to_text(query_str));
-    }
-
-    /* For now, just use the original query */
-    rewritten_query = query_str;
-
-    /* Fetch current storage budget from index management extension */
-    storage_budget = get_storage_budget_mb();
-
-    /* Prepare request payload for AI engine with proper JSON escaping */
-    initStringInfo(&cmd);
-    appendStringInfo(&cmd,
-        "{"
-        "\"query_text\": \"%s\", "
-        "\"auto_create\": true, "
-        "\"storage_budget_mb\": %.2f"
-        "}",
-        rewritten_query,
-        storage_budget
-    );
-
-    /* Send request to AI engine */
-    url = psprintf("%s/index/reactive/manage", workload_forecast_config.server_url);
-
-    response = send_http_request(url, cmd.data);
-
-    if (response == NULL)
-    {
-        ereport(WARNING,
-                (errmsg("Failed to communicate with AI engine at %s", url)));
-        pfree(query_str);
-        if (rewritten_query != query_str)
-            pfree(rewritten_query);
-        pfree(cmd.data);
-        pfree(url);
-        PG_RETURN_TEXT_P(cstring_to_text(rewritten_query));
-    }
-
-    ereport(LOG,
-            (errmsg("Reactive query sent to AI engine: query=%s, response=%s",
-                    rewritten_query, response)));
-
-    /* Return the rewritten query */
-    result_text = cstring_to_text(rewritten_query);
-
-    /* Cleanup */
-    pfree(query_str);
-    pfree(cmd.data);
-    pfree(url);
-    pfree(response);
-
-    PG_RETURN_TEXT_P(result_text);
-}
-
-/* Retrieve storage budget from nr_index_management */
-static double
-get_storage_budget_mb(void)
-{
-    double budget = 1000.0; /* fallback */
-
-    if (SPI_connect() != SPI_OK_CONNECT)
-        return budget;
-
-    if (SPI_execute("SELECT nr_calculate_index_budget_mb()", true, 1) == SPI_OK_SELECT &&
-        SPI_processed > 0)
-    {
-        bool isnull = false;
-        Datum val = SPI_getbinval(SPI_tuptable->vals[0],
-                                  SPI_tuptable->tupdesc,
-                                  1,
-                                  &isnull);
-        if (!isnull)
-            budget = DatumGetFloat8(val);
-    }
-
-    SPI_finish();
-    return budget;
 }

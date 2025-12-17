@@ -63,7 +63,6 @@ set(SOURCES
     src/query_logger.c
     src/http_client.c
     src/query_rewrite.c
-    src/nr_index_reactive.c
 )
 
 # Create shared library (PostgreSQL extension)
