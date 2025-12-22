@@ -1114,7 +1114,14 @@ nrim_worker_index_exists(Oid relid, AttrNumber *cols, int ncols)
                      "JOIN pg_am am ON am.oid = ic.relam "
                      "WHERE i.indrelid = %u "
                      "  AND am.amname = 'btree' "
-                     "  AND i.indisvalid AND i.indisready "
+                     "  AND ic.relkind = 'i' "
+                     /*
+                      * IMPORTANT: do NOT require indisvalid/indisready here.
+                      * For CREATE INDEX CONCURRENTLY, the index is visible in
+                      * catalogs early but may not be ready/valid yet. If we
+                      * filtered those out, multiple work items could race and
+                      * create duplicate indexes with different names.
+                      */
                      "  AND i.indkey::int2[] = ARRAY[",
                      relid);
     for (int i = 0; i < ncols; i++)
@@ -1165,10 +1172,24 @@ nrim_worker_build_index_name(Oid relid, AttrNumber *cols, int ncols, uint64 quer
 {
     StringInfoData buf;
     char *relname;
-    uint32 h = DatumGetUInt32(hash_any((const unsigned char *) &query_id, sizeof(query_id)));
+    uint32 h;
+    struct
+    {
+        Oid relid;
+        int16 ncols;
+        int16 cols[8];
+    } key;
 
     initStringInfo(&buf);
     relname = get_rel_name(relid);
+
+    /* Stable naming: only depends on the indexed columns, not the query. */
+    memset(&key, 0, sizeof(key));
+    key.relid = relid;
+    key.ncols = (int16) ncols;
+    for (int i = 0; i < ncols && i < 8; i++)
+        key.cols[i] = (int16) cols[i];
+    h = DatumGetUInt32(hash_any((const unsigned char *) &key, sizeof(key)));
 
     appendStringInfoString(&buf, "idx_reactive_");
     appendStringInfoString(&buf, relname ? relname : "table");
@@ -2623,6 +2644,27 @@ nrim_process_one_work_item(Oid dboid)
                     pfree(q);
                     pfree(err_lit);
                 }
+                goto done_tx;
+            }
+
+            /*
+             * Re-check for duplicates right before creating.
+             * Another work item may have started (or finished) creating the same
+             * index concurrently after we scored candidates.
+             */
+            if (nrim_worker_index_exists(best_relid, best_cols, best_ncols))
+            {
+                if (nr_reactive_debug)
+                    NRIM_ELOG("NRIM v2 worker: skipping CREATE INDEX (matching index already exists) relid=%u ncols=%d",
+                              best_relid, best_ncols);
+                {
+                    char *q = psprintf("UPDATE nrim.nrim_work_queue SET status='done', last_error=NULL WHERE id=%lld",
+                                       (long long) work_id);
+                    (void) SPI_execute(q, false, 0);
+                    pfree(q);
+                }
+                pfree(nspname);
+                pfree(relname);
                 goto done_tx;
             }
 

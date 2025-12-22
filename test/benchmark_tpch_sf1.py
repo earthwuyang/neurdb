@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Benchmark NeurDB index management with DriftBench.
+Benchmark NeurDB index management with DriftBench for TPC-H SF1.
 
 Runs DriftBench twice:
 1) Reactive interception ON, auto-index creation OFF
@@ -28,13 +28,13 @@ import psycopg2
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="Benchmark NeurDB index management with DriftBench (no-auto vs auto)"
+        description="Benchmark NeurDB index management with DriftBench for TPC-H SF1 (no-auto vs auto)"
     )
     parser.add_argument(
         "--driftbench_path",
         type=str,
         default='/Volumes/data/DB/DriftBench',
-        help="Path to DriftBench repo (default: auto-detect)"
+        help="Path to DriftBench repo (default: /Volumes/data/DB/DriftBench)"
     )
     parser.add_argument(
         "--query_num",
@@ -51,7 +51,7 @@ def parse_args():
         "--output_dir",
         type=str,
         default=None,
-        help="Output directory (default: output/driftbench_imdb_benchmark_TIMESTAMP)"
+        help="Output directory (default: output/driftbench_tpch_benchmark_TIMESTAMP)"
     )
     parser.add_argument(
         "--seed",
@@ -92,7 +92,7 @@ def parse_args():
     parser.add_argument(
         "--database",
         type=str,
-        default="imdb_test",
+        default="tpch_sf1",
         help="PostgreSQL database"
     )
     parser.add_argument(
@@ -113,6 +113,11 @@ def parse_args():
         dest="reset_nrim",
         default=True,
         help="Do not reset NRIM bookkeeping tables (default: reset)"
+    )
+    parser.add_argument(
+        "--generate_workload",
+        action="store_true",
+        help="Generate TPC-H drift workload if not exists"
     )
     return parser.parse_args()
 
@@ -338,19 +343,33 @@ def snapshot_driftbench_outputs(driftbench_path: str, out_dir: str, prefix: str)
 
 def load_mixed_workload(driftbench_path: str, *, max_queries: int, seed: int) -> pd.DataFrame:
     workload_dir = os.path.join(driftbench_path, "output", "neurdb_benchmark", "workloads")
+
+    # First try to load the simple mixed workload we generated
+    workload_file = os.path.join(workload_dir, "tpch_mixed_workload.csv")
+    if os.path.exists(workload_file):
+        df = pd.read_csv(workload_file)
+        if max_queries and len(df) > max_queries:
+            df = df.head(max_queries)
+        # Shuffle with seed
+        df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
+        print(f"✅ Loaded {len(df)} TPC-H queries from mixed workload")
+        return df
+
+    # Fallback: try to find any individual workloads from DriftSpec generation
     scenarios = [
-        ("imdb_popular_actor_drift.csv", "popular_actor"),
-        ("imdb_movie_cast_drift.csv", "movie_cast"),
-        ("imdb_role_search_drift.csv", "role_search"),
-        ("imdb_multi_criteria_drift.csv", "multi_criteria"),
-        ("imdb_award_season_drift.csv", "award_season"),
+        ("tpch_lineitem_price_drift.csv", "lineitem_price"),
+        ("tpch_orders_customer_drift.csv", "orders_customer"),
+        ("tpch_part_supplier_drift.csv", "part_supplier"),
+        ("tpch_nation_region_drift.csv", "nation_region"),
+        ("tpch_revenue_analytics_drift.csv", "revenue_analytics"),
     ]
 
     dfs = []
     for fn, scenario in scenarios:
         path = os.path.join(workload_dir, fn)
         if not os.path.isfile(path):
-            raise FileNotFoundError(f"DriftBench workload not found: {path}")
+            print(f"Warning: TPC-H workload not found: {path}, will be generated if --generate_workload is used")
+            continue
         df = pd.read_csv(path)
         if "query" not in df.columns:
             raise ValueError(f"Workload file missing 'query' column: {path}")
@@ -358,11 +377,38 @@ def load_mixed_workload(driftbench_path: str, *, max_queries: int, seed: int) ->
         df["scenario"] = scenario
         dfs.append(df)
 
+    if not dfs:
+        if max_queries > 0:  # Only generate if we actually want queries
+            return generate_simple_tpch_workload(driftbench_path, max_queries, seed)
+        else:
+            raise FileNotFoundError("No TPC-H workloads found and generation not requested")
+
     mixed = pd.concat(dfs, ignore_index=True)
     mixed = mixed.sample(frac=1, random_state=seed).reset_index(drop=True)
     if max_queries and len(mixed) > max_queries:
         mixed = mixed.head(max_queries)
     return mixed
+
+
+def generate_simple_tpch_workload(driftbench_path: str, query_num: int, seed: int) -> pd.DataFrame:
+    """Generate simple TPC-H workload using our existing generator"""
+    print("Generating TPC-H workload using simple generator...")
+
+    # Use our simple workload generator
+    workload_script = os.path.join(os.path.dirname(__file__), "generate_tpch_workload.py")
+
+    # Run the workload generator
+    cmd = [sys.executable, workload_script, str(query_num)]
+    res = subprocess.run(cmd, capture_output=True, text=True)
+
+    if res.returncode != 0:
+        print(f"❌ Workload generation failed: {res.stderr}")
+        raise RuntimeError("TPC-H workload generation failed")
+
+    print("TPC-H workload generation completed!")
+
+    # Load and return the generated workloads
+    return load_mixed_workload(driftbench_path, max_queries=query_num, seed=seed)
 
 
 @dataclass
@@ -523,7 +569,7 @@ def main():
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     if args.output_dir is None:
-        args.output_dir = os.path.join("output", f"driftbench_imdb_benchmark_{timestamp}")
+        args.output_dir = os.path.join("output", f"driftbench_tpch_benchmark_{timestamp}")
     os.makedirs(args.output_dir, exist_ok=True)
 
     driftbench_path = args.driftbench_path
@@ -554,7 +600,7 @@ def main():
             args,
             workload_df,
             noauto_csv,
-            application_name="driftbench_noauto_client",
+            application_name="driftbench_tpch_noauto_client",
         )
         extract_nrim_events(
             args.pg_logfile,
@@ -576,7 +622,7 @@ def main():
             args,
             workload_df,
             auto_csv,
-            application_name="driftbench_auto_client",
+            application_name="driftbench_tpch_auto_client",
         )
         extract_nrim_events(
             args.pg_logfile,
@@ -593,7 +639,7 @@ def main():
 
     # Print summary + save comparison.
     print("\n" + "=" * 72)
-    print("DRIFTBENCH SUMMARY (IMDb)")
+    print("DRIFTBENCH SUMMARY (TPC-H SF1)")
     print("=" * 72)
     print(f"Mode: no-auto  avg={metrics_noauto['avg_s']:.4f}s  median={metrics_noauto['median_s']:.4f}s  p95={metrics_noauto['p95_s']:.4f}s  ok={metrics_noauto['successful_queries']}/{metrics_noauto['total_queries']}")
     print(f"Mode: auto     avg={metrics_auto['avg_s']:.4f}s  median={metrics_auto['median_s']:.4f}s  p95={metrics_auto['p95_s']:.4f}s  ok={metrics_auto['successful_queries']}/{metrics_auto['total_queries']}")
